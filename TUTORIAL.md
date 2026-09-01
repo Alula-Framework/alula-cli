@@ -68,7 +68,7 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Swift-Flight/flight.git",
+        .package(url: "https://github.com/Flight-Framework/flight.git",
                  from: "0.1.2", traits: ["Web"])
     ],
     targets: [
@@ -357,9 +357,9 @@ Note that `require` does **not** verify certificates; `verify-full` does.
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Swift-Flight/flight.git",
+    .package(url: "https://github.com/Flight-Framework/flight.git",
              from: "0.1.2", traits: ["Web"]),
-    .package(url: "https://github.com/Swift-Flight/flight-data.git",
+    .package(url: "https://github.com/Flight-Framework/flight-data.git",
              from: "0.1.2", traits: ["Postgres"]),
 ],
 ```
@@ -1002,7 +1002,7 @@ whole data structure exists to keep, which is why the demo's
 
 Clients get one `flight:presence_state` on join, then `flight:presence_diff`s.
 Both reference clients maintain the list for you: `FlightPresenceClient` in
-Swift, `@swift-flight/channels/presence` in JavaScript.
+Swift, `@flight-framework/channels/presence` in JavaScript.
 
 ## Stage 3.6 — Caching the expensive reads
 

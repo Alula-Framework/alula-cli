@@ -80,7 +80,7 @@ struct TraitRewriter {
     private static func replacingTraits(
         in manifest: String, package: String, with names: [String]
     ) -> String {
-        let marker = "Swift-Flight/\(package).git"
+        let marker = "Flight-Framework/\(package).git"
         var lines = manifest.split(separator: "\n", omittingEmptySubsequences: false).map(
             String.init)
         guard let index = lines.firstIndex(where: { $0.contains(marker) }) else { return manifest }

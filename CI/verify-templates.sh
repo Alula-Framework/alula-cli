@@ -49,7 +49,7 @@ def to_path(match):
     return f".package({args})"
 
 text = re.sub(
-    r'\.package\(\s*url:\s*"https://github\.com/Swift-Flight/([a-z-]+)\.git"\s*,([^)]*)\)',
+    r'\.package\(\s*url:\s*"https://github\.com/Flight-Framework/([a-z-]+)\.git"\s*,([^)]*)\)',
     to_path, text)
 manifest.write_text(text)
 PY

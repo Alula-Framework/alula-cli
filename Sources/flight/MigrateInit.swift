@@ -70,13 +70,13 @@ struct MigrateInit {
         let manifestURL = project.root.appendingPathComponent("Package.swift")
         var manifest = project.manifest
 
-        if !manifest.contains("Swift-Flight/flight-data.git") {
+        if !manifest.contains("Flight-Framework/flight-data.git") {
             guard let range = manifest.range(of: "    dependencies: [\n") else {
                 throw CLIError.manifestUnrecognised("no dependencies: [ array")
             }
             manifest.insert(
                 contentsOf: """
-                            .package(url: "https://github.com/Swift-Flight/flight-data.git",
+                            .package(url: "https://github.com/Flight-Framework/flight-data.git",
                                      from: "0.1.2", traits: ["Postgres"]),\n
                     """,
                 at: range.upperBound)

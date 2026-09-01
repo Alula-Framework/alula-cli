@@ -27,8 +27,8 @@ struct TraitsTests {
     func rewriting() {
         let manifest = """
             dependencies: [
-                .package(url: "https://github.com/Swift-Flight/flight.git", from: "0.1.2", traits: ["Web"]),
-                .package(url: "https://github.com/Swift-Flight/flight-data.git", from: "0.1.2", traits: ["Postgres"]),
+                .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.1.2", traits: ["Web"]),
+                .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.1.2", traits: ["Postgres"]),
             ],
             """
 
@@ -45,7 +45,7 @@ struct TraitsTests {
     @Test("asking for nothing empties the list rather than dropping the argument")
     func none() {
         let manifest =
-            #".package(url: "https://github.com/Swift-Flight/flight-data.git", from: "0.1.2", traits: ["Postgres"]),"#
+            #".package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.1.2", traits: ["Postgres"]),"#
         let rewritten = TraitRewriter(capabilities: []).rewrite(manifest)
         #expect(rewritten.contains("traits: []"))
     }

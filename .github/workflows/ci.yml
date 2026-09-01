@@ -52,25 +52,25 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          repository: Swift-Flight/flight
+          repository: Flight-Framework/flight
           token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
           path: flight
 
       - uses: actions/checkout@v4
         with:
-          repository: Swift-Flight/flight-data
+          repository: Flight-Framework/flight-data
           token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
           path: flight-data
 
       - uses: actions/checkout@v4
         with:
-          repository: Swift-Flight/hangar
+          repository: Flight-Framework/hangar
           token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
           path: Hangar/hangar
 
       - uses: actions/checkout@v4
         with:
-          repository: Swift-Flight/swift-changeset
+          repository: Flight-Framework/swift-changeset
           token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
           path: Data/swift-changeset
 

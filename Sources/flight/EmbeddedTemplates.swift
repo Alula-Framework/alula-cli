@@ -26,8 +26,8 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Swift-Flight/flight.git", from: "0.7.0", traits: ["Web"]),
-        .package(url: "https://github.com/Swift-Flight/flight-data.git", from: "0.1.2", traits: ["Postgres"]),
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.7.0", traits: ["Web"]),
+        .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.1.2", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -597,8 +597,8 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Swift-Flight/flight.git", from: "0.7.0", traits: ["Security"]),
-        .package(url: "https://github.com/Swift-Flight/flight-data.git", from: "0.2.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.7.0", traits: ["Security"]),
+        .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.2.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -3734,7 +3734,7 @@ let package = Package(
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // container and lifecycle.
-        .package(url: "https://github.com/Swift-Flight/flight.git", from: "0.7.0", traits: ["Web"])
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.7.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
