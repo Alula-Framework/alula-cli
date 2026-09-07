@@ -26,8 +26,8 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.7.0", traits: ["Web"]),
-        .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.1.2", traits: ["Postgres"]),
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.14.0", traits: ["Web"]),
+        .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.5.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -93,7 +93,7 @@ struct HealthController {
     /// verifies the key exists — misspell it and the build fails, naming it.
     @ConfigValue("app.name") var appName: String
 
-    @GetMapping("/")
+    @GetRoute("/")
     func index(_ context: RequestContext) -> String {
         "\(appName) is flying"
     }
@@ -119,27 +119,30 @@ struct CreateUserRequest: Codable {
 @Controller
 struct UserController {
 
-    @GetMapping("/users")
+    /// The seam, not the concrete repository. Exactly one type in this
+    /// target conforms to it, so the registration generator synthesizes the
+    /// binding — nothing registers it by hand, and a test can register its
+    /// own fake under the same key.
+    @Inject var users: (any UserRepositoryProtocol)
+
+    @GetRoute("/users")
     func list(_ context: RequestContext) async throws -> [User] {
-        try await context.resolve((any UserRepositoryProtocol).self).all()
+        try await users.all()
     }
 
-    @GetMapping("/users/:id")
+    @GetRoute("/users/:id")
     func get(_ context: RequestContext) async throws -> User {
         guard let id = context.pathParam("id").flatMap({ UUID(uuidString: $0) }) else {
             throw HTTPError(.badRequest, "user id must be a UUID")
         }
-        let users = try context.resolve((any UserRepositoryProtocol).self)
         guard let user = try await users.find(byID: id) else {
             throw HTTPError(.notFound, "no user \(id)")
         }
         return user
     }
 
-    @PostMapping("/users")
+    @PostRoute("/users")
     func create(_ context: RequestContext, body: CreateUserRequest) async throws -> Response {
-        let users = try context.resolve((any UserRepositoryProtocol).self)
-
         // Validation runs before any SQL does: a changeset collects the
         // changes, checks them, and only a valid one reaches the database.
         let changeset = Changeset(User.self)
@@ -185,7 +188,6 @@ import FlightCore
 import FlightDataPostgres
 import FlightTransport
 import FlightWeb
-import Foundation
 
 /// Your application's module: one place that says what this app is made of.
 ///
@@ -202,6 +204,10 @@ struct AppModule: FlightModule {
     }
 
     func configure(_ container: Container) throws {
+        // Everything the plugin scanned — including the binding from
+        // `(any UserRepositoryProtocol)` to `UserRepository`. A controller
+        // that injects a protocol with exactly one conformer in this target
+        // gets that bridge synthesized, so the seam costs no wiring here.
         try flightRegisterAll(container)
     }
 }
@@ -213,34 +219,20 @@ struct Main {
         // DAG configures, the container freezes, and only then does the
         // server start accepting requests. Nothing serves traffic against a
         // half-registered container.
-        do {
-            try await Flight.bootstrap(
-                configuration: try Configuration.load(),
-                modules: [
-                    FlightWebModule<FlightTransport>.self,
-                    AppModule.self,
-                    ActuatorModule.self,
-                ]
-            )
-        } catch {
-            // Not `main() async throws`. An error escaping `main` is reported
-            // by the Swift runtime as "Fatal error: Error raised at top
-            // level" followed by a register dump and a backtrace — which is
-            // what a new project sees when Postgres is not running or port
-            // 8080 is already bound. Those two deserve a line of text and a
-            // non-zero exit, not a crash report.
-            //
-            // `String(reflecting:)` rather than plain interpolation because
-            // PostgresNIO's `description` is deliberately redacted — it says
-            // "Generic description to prevent accidental leakage" and nothing
-            // about what went wrong. The reflected form names the host, the
-            // port and the errno. That is safe here specifically: this is a
-            // startup failure, so there are no user queries or bind values to
-            // leak, and the process is about to exit.
-            FileHandle.standardError.write(
-                Data("App failed to start: \(String(reflecting: error))\n".utf8))
-            exit(1)
-        }
+        //
+        // `Flight.run` rather than `main() async throws`: an error escaping
+        // `main` is reported by the Swift runtime as "Fatal error: Error
+        // raised at top level" followed by a register dump and a backtrace —
+        // which is what a new project sees when Postgres is not running or
+        // the port is already bound. `run` prints the reason and exits 1.
+        await Flight.run(
+            configuration: try Configuration.load(),
+            modules: [
+                FlightWebModule<FlightTransport>.self,
+                AppModule.self,
+                ActuatorModule.self,
+            ]
+        )
     }
 }
 
@@ -249,33 +241,50 @@ struct Main {
 import FlightDataPostgres
 import Foundation
 
-/// Data access, scoped to one request.
+/// Data access.
 ///
-/// `scope: .scoped` means one instance per request, holding one pooled
-/// connection for that request's life. Resolving a repository outside any
-/// scope is an error rather than a silently new connection — which is what
-/// makes "which connection is this query on" always answerable.
-@Repository(scope: .scoped)
+/// The repository holds the *pool* and leases a connection for each
+/// operation — `withRepo` is that bracket. There is no request-scoped
+/// connection to reason about: the borrow starts where you can see it and
+/// ends when the closure returns, and two calls are two independent leases.
+///
+/// When several statements must share one connection — and therefore one
+/// transaction — put them inside a single `withRepo`, and use Hangar's own
+/// `repo.transaction { }` inside that.
+@Repository
 struct UserRepository: UserRepositoryProtocol {
-    /// The scope's connection-bound query interface.
-    @Autowired var repo: Repo
+    /// The pool, registered by `PostgresDataModule<PrimaryDataSource>`.
+    ///
+    /// `flight:hand-registered` tells the registration generator that this
+    /// type is registered by a module rather than scanned from this target,
+    /// so it does not warn about a component it cannot see.
+    // flight:hand-registered — PostgresDataModule registers the pool.
+    @Inject var pool: PostgresDataSource
 
     func all() async throws -> [User] {
-        try await repo.all(User.all.order { $0.createdAt.desc() })
+        try await pool.withRepo { repo in
+            try await repo.all(User.all.order { $0.createdAt.desc() })
+        }
     }
 
     func find(byID id: UUID) async throws -> User? {
-        try await repo.one(User.where { $0.id == id })
+        try await pool.withRepo { repo in
+            try await repo.one(User.where { $0.id == id })
+        }
     }
 
     func find(byEmail email: String) async throws -> User? {
-        try await repo.one(User.where { $0.email == email })
+        try await pool.withRepo { repo in
+            try await repo.one(User.where { $0.email == email })
+        }
     }
 
     func create(name: String, email: String) async throws -> User {
         let now = Date()
-        return try await repo.insert(
-            User(id: UUID(), name: name, email: email, createdAt: now, updatedAt: now))
+        return try await pool.withRepo { repo in
+            try await repo.insert(
+                User(id: UUID(), name: name, email: email, createdAt: now, updatedAt: now))
+        }
     }
 }
 
@@ -321,7 +330,7 @@ struct CreateUsers: Migration {
         // map to columns with no case conversion, so a helper that generated
         // `created_at` would silently miss `createdAt` — spelled out instead.
         schema.createTable("users") { t in
-            t.uuid("id").primaryKey().default(.uuid)
+            t.uuid("id").primaryKey().default(.generatedUUID)
             t.varchar("name", limit: 30).notNull()
             t.varchar("email", limit: 50).notNull().unique()
             t.timestamptz("createdAt").notNull().default(.now)
@@ -530,7 +539,7 @@ private struct Fake: FlightModule {
 
     func configure(_ container: Container) throws {
         let users = self.users
-        container.register((any UserRepositoryProtocol).self, scope: .scoped) { _ in users }
+        container.register((any UserRepositoryProtocol).self, scope: .singleton) { _ in users }
     }
 }
 
@@ -597,8 +606,8 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.7.0", traits: ["Security"]),
-        .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.2.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.14.0", traits: ["Security"]),
+        .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.5.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -873,7 +882,7 @@ struct AttachmentController {
         let bytes: Int
     }
 
-    @PostMapping("/attachments", maxBodyBytes: 64 << 20)
+    @PostRoute("/attachments", maxBodyBytes: 64 << 20)
     func upload(_ context: RequestContext, body: RequestBodyStream) async throws -> [Received] {
         var received: [Received] = []
         for try await part in try context.request.multipart() {
@@ -975,7 +984,7 @@ struct ChatController {
     /// author, and each message's topics, as one JSON document.
     ///
     /// Unloaded associations serialize as `null`; loaded ones as their value.
-    @GetMapping("/rooms/:slug")
+    @GetRoute("/rooms/:slug")
     func room(_ context: RequestContext) async throws -> Room {
         guard let slug = context.pathParam("slug") else {
             throw HTTPError(.badRequest, "room slug is required")
@@ -989,7 +998,7 @@ struct ChatController {
 
     /// `GET /users/:id/history` — a user with everything they wrote.
     /// The association crosses a nullable foreign key.
-    @GetMapping("/users/:id/history")
+    @GetRoute("/users/:id/history")
     func history(_ context: RequestContext) async throws -> User {
         let id = try context.uuidPathParam("id")
         let chat = try context.resolve(ChatRepository.self)
@@ -1002,7 +1011,7 @@ struct ChatController {
     // MARK: Joins
 
     /// `GET /messages/recent` — a three-table join, flattened.
-    @GetMapping("/messages/recent")
+    @GetRoute("/messages/recent")
     func recent(_ context: RequestContext) async throws -> [MessageCard] {
         let limit = context.request.queryParam("limit").flatMap(Int.init) ?? 25
         return try await context.resolve(ChatRepository.self).recentCards(limit: limit)
@@ -1010,7 +1019,7 @@ struct ChatController {
 
     /// `GET /messages/:id/thread` — `messages` joined to itself under two
     /// aliases, so each reply arrives next to the message it answers.
-    @GetMapping("/messages/:id/thread")
+    @GetRoute("/messages/:id/thread")
     func thread(_ context: RequestContext) async throws -> [ThreadEntry] {
         let id = try context.uuidPathParam("id")
         return try await context.resolve(ChatRepository.self).thread(rootID: id)
@@ -1021,7 +1030,7 @@ struct ChatController {
     /// `GET /activity?min=3` — GROUP BY with HAVING.
     /// Served from the cache when warm — see `RoomDigestService`. Posting a
     /// message evicts it, so the "post then reload" loop stays truthful.
-    @GetMapping("/activity")
+    @GetRoute("/activity")
     func activity(_ context: RequestContext) async throws -> [RoomActivity] {
         let minimum = context.request.queryParam("min").flatMap(Int.init) ?? 1
         return try await context.resolve(RoomDigestService.self)
@@ -1029,7 +1038,7 @@ struct ChatController {
     }
 
     /// `GET /headlines` — `DISTINCT ON`, one row per room.
-    @GetMapping("/headlines")
+    @GetRoute("/headlines")
     func headlines(_ context: RequestContext) async throws -> [RoomHeadline] {
         try await context.resolve(RoomDigestService.self).headlines()
     }
@@ -1039,7 +1048,7 @@ struct ChatController {
     /// `GET /messages/search?sender=ada&redacted=false` — every query
     /// parameter is checked against the allowlist on `ChatMessage` before it
     /// can affect the SQL. An unlisted field is a 400, not a silent no-op.
-    @GetMapping("/messages/search")
+    @GetRoute("/messages/search")
     func search(_ context: RequestContext) async throws -> [ChatMessage] {
         var filters: [String: DynamicFilterValue] = [:]
         for item in context.request.queryItems where item.name != "limit" {
@@ -1069,7 +1078,7 @@ struct ChatController {
     /// connections. It exists mostly so presence is observable with `curl`:
     /// the real consumers are WebSocket clients, which get a
     /// `flight:presence_state` on join and `flight:presence_diff`s after.
-    @GetMapping("/rooms/:slug/who")
+    @GetRoute("/rooms/:slug/who")
     func who(_ context: RequestContext) async throws -> Response {
         guard let slug = context.pathParam("slug") else {
             throw HTTPError(.badRequest, "room slug is required")
@@ -1093,16 +1102,13 @@ struct ChatController {
 
     /// `POST /rooms` — room and opening message as one named `Multi`.
     ///
-    /// `Transactions` middleware binds the `@Transactional` coordinator
-    /// around every request, this one included — but this handler never
-    /// calls a `@Transactional` method, so that binding just sits there
-    /// unused. Its own unit of work drives a transaction through Hangar
-    /// instead (`Multi` opens one of its own). What is genuinely a mistake
-    /// is a `@Transactional` method *also* using `Multi` in the same call —
-    /// neither coordinator sees the other's nesting — not the two merely
-    /// being present in the same request. `POST /chatUser` on
-    /// `UserController` is the other choice, made the other way.
-    @PostMapping("/rooms")
+    /// The unit of work is a `Multi`: steps decided before they run, named,
+    /// and executed in one transaction that Hangar opens. There is no
+    /// ambient coordinator to bind and nothing outside this call that could
+    /// be nesting a transaction around it — the boundary is the closure you
+    /// can see. `POST /chatUser` on `UserController` is the other shape,
+    /// where the transaction lives inside the repository method.
+    @PostRoute("/rooms")
     func openRoom(_ context: RequestContext, body: OpenRoomRequest) async throws -> Response {
         let chat = try context.resolve(ChatRepository.self)
         do {
@@ -1115,7 +1121,7 @@ struct ChatController {
     }
 
     /// `POST /messages` — a batch of messages as one multi-row INSERT.
-    @PostMapping("/messages")
+    @PostRoute("/messages")
     func post(_ context: RequestContext, body: PostMessagesRequest) async throws -> Response {
         let chat = try context.resolve(ChatRepository.self)
         guard let room = try await chat.room(slug: body.roomSlug, messageLimit: 0) else {
@@ -1152,7 +1158,7 @@ struct ChatController {
     }
 
     /// `POST /topics/:label` — find-or-create without a read-then-write race.
-    @PostMapping("/topics/:label")
+    @PostRoute("/topics/:label")
     func topic(_ context: RequestContext) async throws -> Topic {
         guard let label = context.pathParam("label") else {
             throw HTTPError(.badRequest, "topic label is required")
@@ -1163,7 +1169,7 @@ struct ChatController {
     /// `POST /messages/:id/topics/:label` — tag a message, creating the
     /// topic on first use. Preloading `\.topics` afterwards reads it back
     /// through the join table.
-    @PostMapping("/messages/:id/topics/:label")
+    @PostRoute("/messages/:id/topics/:label")
     func tag(_ context: RequestContext) async throws -> Topic {
         let id = try context.uuidPathParam("id")
         guard let label = context.pathParam("label") else {
@@ -1174,7 +1180,7 @@ struct ChatController {
 
     /// `POST /rooms/:slug/archive` — row lock inside a serializable
     /// transaction, retried on a serialization failure.
-    @PostMapping("/rooms/:slug/archive")
+    @PostRoute("/rooms/:slug/archive")
     func archive(_ context: RequestContext, body: ArchiveRoomRequest) async throws -> Response {
         guard let slug = context.pathParam("slug") else {
             throw HTTPError(.badRequest, "room slug is required")
@@ -1204,7 +1210,7 @@ struct ChatController {
     ///
     ///     curl -XPOST localhost:8080/messages/redact \
     ///          -H 'Authorization: Bearer demo:ada:moderator' ...
-    @PostMapping("/messages/redact")
+    @PostRoute("/messages/redact")
     func redact(_ context: RequestContext, body: RedactRequest) async throws -> Response {
         try context.requireRole("moderator")
         let chat = try context.resolve(ChatRepository.self)
@@ -1217,7 +1223,7 @@ struct ChatController {
 
     /// `DELETE /messages?before=<ISO8601>` — one DELETE over every matching
     /// row, returning how many went.
-    @DeleteMapping("/messages")
+    @DeleteRoute("/messages")
     func purge(_ context: RequestContext) async throws -> Response {
         try context.requireRole("moderator")
         guard let raw = context.request.queryParam("before"),
@@ -1240,7 +1246,7 @@ struct ChatController {
     /// handing the row stream straight to `Response.streaming` would need a
     /// connection that outlives the request scope, which is a different piece
     /// of plumbing than the one this endpoint is demonstrating.
-    @GetMapping("/rooms/:slug/export")
+    @GetRoute("/rooms/:slug/export")
     func export(_ context: RequestContext) async throws -> Response {
         guard let slug = context.pathParam("slug") else {
             throw HTTPError(.badRequest, "room slug is required")
@@ -1312,7 +1318,7 @@ struct HealthController {
     /// verifies the key exists — misspell it and the build fails, naming it.
     @ConfigValue("app.name") var appName: String
 
-    @GetMapping("/")
+    @GetRoute("/")
     func index(_ context: RequestContext) -> String {
         "\(appName) is flying"
     }
@@ -1321,7 +1327,7 @@ struct HealthController {
     /// `pathParam` returns an optional because the route pattern and the
     /// handler are separate things, and a mismatch should be a 400 rather
     /// than a crash.
-    @GetMapping("/echo/:word")
+    @GetRoute("/echo/:word")
     func echo(_ context: RequestContext) async throws -> String {
         guard let word = context.pathParam("word") else {
             throw HTTPError(.badRequest, "a word is required")
@@ -1344,12 +1350,12 @@ struct CreateUserRequest: Codable {
 
 @Controller
 struct UserController {
-    @GetMapping("/users")
+    @GetRoute("/users")
     func listUsers(_ context: RequestContext) async throws -> [User] {
         try await context.resolve(UserService.self).all()
     }
 
-    @GetMapping("/user/:id")
+    @GetRoute("/user/:id")
     func getUser(_ context: RequestContext) async throws -> User {
         guard let id = context.pathParam("id").flatMap({ UUID(uuidString: $0) }) else {
             throw HTTPError(.badRequest, "user id must be a UUID")
@@ -1360,19 +1366,18 @@ struct UserController {
         return user
     }
 
-    /// `UserRepository.signup` is `@Transactional` and writes the lobby
-    /// announcement before the user, so a duplicate email has to roll the
-    /// announcement back. That guarantee depends on a coordinator being
-    /// bound around this call — which, since `Transactions` middleware
-    /// binds one around every request, this handler gets for free rather
-    /// than needing to ask for.
+    /// `UserRepository.signup` writes the lobby announcement before the
+    /// user, so a duplicate email has to roll the announcement back. The
+    /// transaction that makes that true is inside `signup` itself —
+    /// `repo.transaction { }` around both writes — so this handler has
+    /// nothing to bind and nothing to remember.
     ///
-    /// A demo application built on Flight shipped a route that forgot to
-    /// bind one by hand: every write still landed, nothing rolled back, and
-    /// the guarantee in `signup`'s own doc comment was quietly false.
-    /// `@Middleware` is what turned "every handler must remember" into
-    /// "nothing to remember" — see `Web/Transactions.swift`.
-    @PostMapping("/user")
+    /// It used to have both: an ambient coordinator, bound by a middleware,
+    /// which a handler could forget to bind. One that did shipped with every
+    /// write landing and nothing rolling back, and the guarantee in
+    /// `signup`'s own doc comment quietly false. A boundary you can see in
+    /// the code that opens it cannot be forgotten somewhere else.
+    @PostRoute("/user")
     func upsertUser(_ context: RequestContext, body: CreateUserRequest) async throws -> Response {
         context.logger.info("Creating user")
         let service = try context.resolve(UserService.self)
@@ -1392,7 +1397,7 @@ struct UserController {
         return try .json(created)
     }
 
-    @PostMapping("/chatUser")
+    @PostRoute("/chatUser")
     func createUser(_ context: RequestContext, body: CreateUserRequest) async throws -> Response {
         let service = try context.resolve(UserService.self)
         let user = try await service.signup(name: body.name, email: body.email)
@@ -1555,7 +1560,7 @@ import Foundation
 /// difference is the only thing about scheduling that is genuinely hard.
 @Scheduler
 struct ChatJobs {
-    @Autowired var digests: (any DigestReading)
+    @Inject var digests: (any DigestReading)
 
     /// Runs once. Not once per server — once.
     ///
@@ -1607,7 +1612,6 @@ import FlightSchedulerPostgres
 import FlightSecurityCore
 import FlightTransport
 import FlightWeb
-import Foundation
 
 /// Flight Security's `Principal` and Flight Channels' `ChannelPrincipal` are
 /// deliberately unrelated: Channels has no dependency on Security, so a
@@ -1628,12 +1632,13 @@ struct AppModule: FlightModule {
             FlightPresenceModule.self,
             FlightCacheModule.self,
             FlightSchedulerModule.self,
-            // FlightSecurityModule is deliberately NOT here. It installs its
-            // generic OIDC validator unless one is already registered, so it
-            // has to configure *after* this module rather than before it —
-            // which is what listing it later in `bootstrap` below achieves.
-            // Declaring it as a dependency would force the opposite order and
-            // fail the container freeze with a duplicate registration.
+            // Authentication wiring — the request-scoped principal and the
+            // `Authentication` middleware. It registers no validator: how
+            // tokens are validated is chosen by listing a module
+            // (`FlightOIDCModule`) or registering `(any TokenValidator)`
+            // yourself, as this application does below. Order does not
+            // matter, which is why this can simply be a dependency.
+            FlightSecurityModule.self,
         ]
     }
 
@@ -1642,31 +1647,26 @@ struct AppModule: FlightModule {
 
         // Order is declared once, here, top to bottom, outermost first —
         // RequestLogging sees the true wall-clock time of everything below
-        // it, and Transactions runs before anything that might write, so no
-        // handler can begin a unit of work with no coordinator bound.
+        // it.
         container.pipeline {
             RequestLogging.self
-            Transactions.self
         }
 
-        // The gateway, and the two things that depend on it. All three are
-        // singletons that never capture a request-scoped repository — they
-        // open a scope per call instead. See ChatGateway for why.
-        container.register(ChatGateway.self, scope: .singleton) { c in
-            ChatGateway(container: c)
+        // What a pool exhaustion, an invalid changeset or a bad dynamic
+        // filter look like on the wire. See Web/ErrorMapping.swift for why
+        // this cannot be done with a middleware.
+        container.register(ErrorMapper.self, scope: .singleton) { _ in
+            AppErrorMapping.mapper()
         }
+
+        // `ChatRepository` is the only conformer of `RoomStore` in this
+        // target, so anything injecting the protocol gets the bridge
+        // synthesized. The channel below resolves it by hand, at a point
+        // where there is no property to inject into, so the key is stated
+        // once here.
         container.register((any RoomStore).self, scope: .singleton) { c in
-            try c.resolve(ChatGateway.self)
+            try c.resolve(ChatRepository.self)
         }
-        container.register(RoomDigestService.self, scope: .singleton) { c in
-            RoomDigestService(chat: try c.resolve(ChatGateway.self))
-        }
-        // The read seam scheduled jobs depend on, so a job is testable
-        // without a cache or a database behind it.
-        container.register((any DigestReading).self, scope: .singleton) { c in
-            try c.resolve(RoomDigestService.self)
-        }
-
         // Makes `.once` mean once across every server rather than once per
         // server. This demo runs one process, where the coordinator changes
         // nothing — but registering it is the whole difference between a
@@ -1683,13 +1683,11 @@ struct AppModule: FlightModule {
                     PostgresDataSource.self, qualifier: PrimaryDataSource.name))
         }
 
-        // The bring-your-own-auth seam. FlightSecurityModule installs its
-        // generic OIDC validator only if none is registered by the time it
-        // configures — so this must run first, which is why that module is
-        // listed after this one in `bootstrap` rather than declared as a
-        // dependency of it.
+        // The bring-your-own-auth seam: `FlightSecurityModule` registers the
+        // authentication machinery but no validator, so this is the choice.
         //
-        // A real deployment deletes this and configures `security.oidc.*`.
+        // A real deployment deletes this and lists `FlightOIDCModule`
+        // instead, configured through `security.oidc.*`.
         container.register((any TokenValidator).self, scope: .singleton) { _ in
             DemoTokenValidator()
         }
@@ -1723,94 +1721,20 @@ struct Main {
         // Steps 1–3: Flight Config (flight.yaml + FLIGHT_* env). Steps 4–9:
         // container, module DAG, freeze, ServiceGroup — request serving
         // starts only after the whole DAG has registered.
-        do {
-            try await Flight.bootstrap(
-                configuration: try Configuration.load(),
-                modules: [
-                    FlightWebModule<FlightTransport>.self,  // choosing a transport = choosing a module
-                    AppModule.self,
-                    // After AppModule, so it finds the validator registered
-                    // above and stands down instead of installing the OIDC
-                    // default.
-                    FlightSecurityModule.self,
-                    ActuatorModule.self,
-                ]
-            )
-        } catch {
-            // Not `main() async throws`. An error escaping `main` is reported
-            // by the Swift runtime as "Fatal error: Error raised at top
-            // level" followed by a register dump and a backtrace — which is
-            // what a new project sees when Postgres is not running or port
-            // 8080 is already bound. Those two deserve a line of text and a
-            // non-zero exit, not a crash report.
-            //
-            // `String(reflecting:)` rather than plain interpolation because
-            // PostgresNIO's `description` is deliberately redacted — it says
-            // "Generic description to prevent accidental leakage" and nothing
-            // about what went wrong. The reflected form names the host, the
-            // port and the errno. That is safe here specifically: this is a
-            // startup failure, so there are no user queries or bind values to
-            // leak, and the process is about to exit.
-            FileHandle.standardError.write(
-                Data("App failed to start: \(String(reflecting: error))\n".utf8))
-            exit(1)
-        }
-    }
-}
-
-"""#,
-            "Sources/App/Repos/ChatGateway.swift": #"""
-import FlightCore
-import FlightDataPostgres
-import Foundation
-
-/// Bridges long-lived components to request-scoped data access.
-///
-/// `ChatRepository` is `.scoped`: one instance per request, holding one pooled
-/// connection for that request's life. That is the right lifetime for a
-/// repository and the wrong one for anything that outlives a request — a
-/// singleton that captured one would hold a single connection forever, and a
-/// channel that captured one at join time would keep it for the life of a
-/// WebSocket.
-///
-/// So neither captures a repository. They hold this instead, and it opens a
-/// scope per call. The cost is a pooled connection acquired and released
-/// around each operation; the alternative is a connection leak that only shows
-/// up under load.
-///
-/// It satisfies `RoomStore`, so `RoomChannel` is unchanged and its tests still
-/// swap in an in-memory fake.
-struct ChatGateway: RoomStore, Sendable {
-    let container: Container
-
-    private func withRepository<T>(_ body: (ChatRepository) async throws -> T) async throws -> T {
-        try await container.withPostgresScope { scope in
-            try await body(container.resolve(ChatRepository.self, in: scope))
-        }
-    }
-
-    // MARK: RoomStore
-
-    func room(slug: String, messageLimit: Int) async throws -> Room? {
-        try await withRepository { try await $0.room(slug: slug, messageLimit: messageLimit) }
-    }
-
-    func authorIDs(forNames names: [String]) async throws -> [String: UUID] {
-        try await withRepository { try await $0.authorIDs(forNames: names) }
-    }
-
-    func post(_ messages: [ChatMessage]) async throws -> [ChatMessage] {
-        try await withRepository { try await $0.post(messages) }
-    }
-
-    // MARK: Aggregates, for the cached digests
-
-    func activity(minimumMessages: Int) async throws -> [RoomActivity] {
-        try await withRepository { try await $0.activity(minimumMessages: minimumMessages) }
-    }
-
-    func headlines() async throws -> [RoomHeadline] {
-        try await withRepository { try await $0.headlines() }
+        //
+        // `Flight.run` rather than `main() async throws`: an error escaping
+        // `main` is reported by the Swift runtime as "Fatal error: Error
+        // raised at top level" followed by a register dump and a backtrace —
+        // which is what a new project sees when Postgres is not running or
+        // the port is already bound. `run` prints the reason and exits 1.
+        await Flight.run(
+            configuration: try Configuration.load(),
+            modules: [
+                FlightWebModule<FlightTransport>.self,  // choosing a transport = choosing a module
+                AppModule.self,
+                ActuatorModule.self,
+            ]
+        )
     }
 }
 
@@ -1883,11 +1807,14 @@ struct ExportLine: Codable, Sendable {
 /// associations, joins (two-table, three-table, and a table joined to
 /// itself), aggregates, `DISTINCT ON`, set-based writes, upserts, row locks
 /// under a serializable transaction, `Multi`, and streaming.
-@Repository(scope: .scoped)
+@Repository
 struct ChatRepository: RoomStore {
-    // flight:hand-registered — resolved through FlightDataPostgres's
-    // ambient-scope overloads, not a scanned @Component.
-    @Autowired var repo: Repo
+    /// The pool. Every method below leases a connection for exactly its own
+    /// work through `withRepo` and gives it back — there is no request-scoped
+    /// connection, so "which connection is this query on" is answered by the
+    /// bracket you can see rather than by a scope you cannot.
+    // flight:hand-registered — PostgresDataModule registers the pool.
+    @Inject var pool: PostgresDataSource
 
     // MARK: Associations
 
@@ -1900,16 +1827,18 @@ struct ChatRepository: RoomStore {
     /// grow with the number of rows, which is the entire reason preloading
     /// exists instead of a lazy accessor.
     func room(slug: String, messageLimit: Int = 20) async throws -> Room? {
-        try await repo.one(
-            Room.where { $0.slug == slug }
-                .preload(\.messages) { messages in
-                    messages
-                        .where { $0.redacted == false }
-                        .order { $0.sentAt.desc() }
-                        .limit(messageLimit)
-                        .preload(\.author)
-                        .preload(\.topics)
-                })
+        try await pool.withRepo { repo in
+            try await repo.one(
+                Room.where { $0.slug == slug }
+                    .preload(\.messages) { messages in
+                        messages
+                            .where { $0.redacted == false }
+                            .order { $0.sentAt.desc() }
+                            .limit(messageLimit)
+                            .preload(\.author)
+                            .preload(\.topics)
+                    })
+        }
     }
 
     /// A user together with everything they wrote, newest first.
@@ -1918,9 +1847,11 @@ struct ChatRepository: RoomStore {
     /// is NULL for anyone who never registered. Those rows belong to no user
     /// and appear under none.
     func user(id: UUID, historyLimit: Int = 50) async throws -> User? {
-        try await repo.one(
-            User.where { $0.id == id }
-                .preload(\.authored) { $0.order { $0.sentAt.desc() }.limit(historyLimit) })
+        try await pool.withRepo { repo in
+            try await repo.one(
+                User.where { $0.id == id }
+                    .preload(\.authored) { $0.order { $0.sentAt.desc() }.limit(historyLimit) })
+        }
     }
 
     // MARK: Joins
@@ -1934,18 +1865,20 @@ struct ChatRepository: RoomStore {
     /// where is not a stylistic choice — an inner join here would silently
     /// drop those messages.
     func recentCards(limit: Int = 25) async throws -> [MessageCard] {
-        try await repo.all(
-            ChatMessage.join(Room.self, on: { message, room in message.roomID == room.id })
-                .leftJoin(User.self, on: { message, _, user in message.authorID == user.id })
-                .where { message, room, _ in message.redacted == false && room.archived == false }
-                .order { message, _, _ in message.sentAt.desc() }
-                .limit(limit)
-                .select(into: MessageCard.self) { message, room, user in
-                    (
-                        id: message.id, body: message.body, sentAt: message.sentAt,
-                        roomName: room.name, authorName: user.name
-                    )
-                })
+        try await pool.withRepo { repo in
+            try await repo.all(
+                ChatMessage.join(Room.self, on: { message, room in message.roomID == room.id })
+                    .leftJoin(User.self, on: { message, _, user in message.authorID == user.id })
+                    .where { message, room, _ in message.redacted == false && room.archived == false }
+                    .order { message, _, _ in message.sentAt.desc() }
+                    .limit(limit)
+                    .select(into: MessageCard.self) { message, room, user in
+                        (
+                            id: message.id, body: message.body, sentAt: message.sentAt,
+                            roomName: room.name, authorName: user.name
+                        )
+                    })
+        }
     }
 
     /// Replies paired with the messages they answer — one table joined to
@@ -1957,18 +1890,20 @@ struct ChatRepository: RoomStore {
     /// the aliases this is not a query Hangar will build — it refuses rather
     /// than emitting ambiguous SQL.
     func thread(rootID: UUID) async throws -> [ThreadEntry] {
-        let reply = ChatMessage.alias("reply")
-        let root = ChatMessage.alias("root")
-        return try await repo.all(
-            reply.join(root, on: { reply, root in reply.parentID == root.id })
-                .where { _, root in root.id == rootID }
-                .order { reply, _ in reply.sentAt.asc() }
-                .select(into: ThreadEntry.self) { reply, root in
-                    (
-                        replyID: reply.id, replyBody: reply.body,
-                        replySentAt: reply.sentAt, parentBody: root.body
-                    )
-                })
+        try await pool.withRepo { repo in
+            let reply = ChatMessage.alias("reply")
+            let root = ChatMessage.alias("root")
+            return try await repo.all(
+                reply.join(root, on: { reply, root in reply.parentID == root.id })
+                    .where { _, root in root.id == rootID }
+                    .order { reply, _ in reply.sentAt.asc() }
+                    .select(into: ThreadEntry.self) { reply, root in
+                        (
+                            replyID: reply.id, replyBody: reply.body,
+                            replySentAt: reply.sentAt, parentBody: root.body
+                        )
+                    })
+        }
     }
 
     // MARK: Aggregates
@@ -1976,14 +1911,16 @@ struct ChatRepository: RoomStore {
     /// Message counts per room, busiest first, quiet rooms filtered out
     /// *after* grouping — which is what HAVING is for.
     func activity(minimumMessages: Int = 1) async throws -> [RoomActivity] {
-        try await repo.all(
-            ChatMessage.where { $0.redacted == false }
-                .groupBy { $0.room }
-                .having { $0.id.count() >= minimumMessages }
-                .order { $0.room.asc() }
-                .select(into: RoomActivity.self) {
-                    (room: $0.room, messages: $0.id.count(), lastSentAt: $0.sentAt.max())
-                })
+        try await pool.withRepo { repo in
+            try await repo.all(
+                ChatMessage.where { $0.redacted == false }
+                    .groupBy { $0.room }
+                    .having { $0.id.count() >= minimumMessages }
+                    .order { $0.room.asc() }
+                    .select(into: RoomActivity.self) {
+                        (room: $0.room, messages: $0.id.count(), lastSentAt: $0.sentAt.max())
+                    })
+        }
     }
 
     /// The newest message in every room — one row per room, no subquery, no
@@ -1995,14 +1932,16 @@ struct ChatRepository: RoomStore {
     /// rejects the statement if it doesn't — the ordering is load-bearing, not
     /// cosmetic.
     func headlines() async throws -> [RoomHeadline] {
-        try await repo.all(
-            ChatMessage.all
-                .distinct(on: { $0.roomID })
-                .order { $0.roomID.asc() }
-                .order { $0.sentAt.desc() }
-                .select(into: RoomHeadline.self) {
-                    (roomID: $0.roomID, body: $0.body, sentAt: $0.sentAt)
-                })
+        try await pool.withRepo { repo in
+            try await repo.all(
+                ChatMessage.all
+                    .distinct(on: { $0.roomID })
+                    .order { $0.roomID.asc() }
+                    .order { $0.sentAt.desc() }
+                    .select(into: RoomHeadline.self) {
+                        (roomID: $0.roomID, body: $0.body, sentAt: $0.sentAt)
+                    })
+        }
     }
 
     // MARK: Set-based writes
@@ -2013,17 +1952,21 @@ struct ChatRepository: RoomStore {
     /// query per row and a race with anyone else writing. This is one
     /// statement, and it returns how many rows it touched.
     func redactAll(sender: String, inRoom roomID: UUID) async throws -> Int {
-        try await repo.update(
-            ChatMessage.where { $0.sender == sender && $0.roomID == roomID }
-        ) {
-            ($0.redacted.set(to: true), $0.body.set(to: "[redacted]"))
+        try await pool.withRepo { repo in
+            try await repo.update(
+                ChatMessage.where { $0.sender == sender && $0.roomID == roomID }
+            ) {
+                ($0.redacted.set(to: true), $0.body.set(to: "[redacted]"))
+            }
         }
     }
 
     /// Deletes every message older than a cutoff, in one DELETE. Returns the
     /// number removed.
     func purge(before cutoff: Date) async throws -> Int {
-        try await repo.delete(ChatMessage.where { $0.sentAt < cutoff })
+        try await pool.withRepo { repo in
+            try await repo.delete(ChatMessage.where { $0.sentAt < cutoff })
+        }
     }
 
     /// Sender names → user ids, in one query rather than one per name.
@@ -2033,15 +1976,19 @@ struct ChatRepository: RoomStore {
     /// result decodes straight into a dictionary. A sender who never
     /// registered is simply absent — which is what leaves `authorID` NULL.
     func authorIDs(forNames names: [String]) async throws -> [String: UUID] {
-        let pairs = try await repo.all(
-            User.where { $0.name.in(names) }.select { ($0.name, $0.id) })
-        return Dictionary(pairs, uniquingKeysWith: { first, _ in first })
+        try await pool.withRepo { repo in
+            let pairs = try await repo.all(
+                User.where { $0.name.in(names) }.select { ($0.name, $0.id) })
+            return Dictionary(pairs, uniquingKeysWith: { first, _ in first })
+        }
     }
 
     /// Inserts a batch of messages as one multi-row INSERT ... RETURNING —
     /// one round trip regardless of how many.
     func post(_ messages: [ChatMessage]) async throws -> [ChatMessage] {
-        try await repo.insert(messages)
+        try await pool.withRepo { repo in
+            try await repo.insert(messages)
+        }
     }
 
     /// Finds or creates a topic by label, without a read-then-write race.
@@ -2050,6 +1997,18 @@ struct ChatRepository: RoomStore {
     /// loses on the unique index. `ON CONFLICT ... DO UPDATE` makes the loser
     /// return the winning row instead of failing.
     func topic(label: String) async throws -> Topic {
+        try await pool.withRepo { repo in
+            try await Self.upsertTopic(label: label, on: repo)
+        }
+    }
+
+    /// The upsert both `topic` and `tag` need, taking a repo the caller
+    /// already holds.
+    ///
+    /// `tag` calling `topic(label:)` would lease a *second* connection while
+    /// still holding the first — which is how a small pool deadlocks under
+    /// load, and how a two-statement unit of work stops being one.
+    private static func upsertTopic(label: String, on repo: Repo) async throws -> Topic {
         let created = try await repo.insert(
             Changeset(Topic.self).change(\.label, label),
             onConflict: .doUpdate(target: [\Topic.label], set: [\Topic.label]))
@@ -2065,13 +2024,15 @@ struct ChatRepository: RoomStore {
     /// rather than an error — the join table's `UNIQUE (messageID, topicID)`
     /// is what makes `.doNothing` meaningful.
     func tag(messageID: UUID, label: String) async throws -> Topic {
-        let topic = try await self.topic(label: label)
-        _ = try await repo.insert(
-            Changeset(MessageTopic.self)
-                .change(\.messageID, messageID)
-                .change(\.topicID, topic.id),
-            onConflict: .doNothing(target: [\MessageTopic.messageID, \MessageTopic.topicID]))
-        return topic
+        try await pool.withRepo { repo in
+            let topic = try await Self.upsertTopic(label: label, on: repo)
+            _ = try await repo.insert(
+                Changeset(MessageTopic.self)
+                    .change(\.messageID, messageID)
+                    .change(\.topicID, topic.id),
+                onConflict: .doNothing(target: [\MessageTopic.messageID, \MessageTopic.topicID]))
+            return topic
+        }
     }
 
     // MARK: Transactions
@@ -2091,20 +2052,22 @@ struct ChatRepository: RoomStore {
     ///   Serializable without a retry is not a working design; the retry is
     ///   the other half of the feature.
     func archive(roomID: UUID, movingMessagesTo destinationID: UUID) async throws -> Int {
-        try await repo.transaction(isolation: .serializable, retryingOnSerializationFailure: 3) { tx in
-            guard let room = try await tx.one(Room.where { $0.id == roomID }.lockForUpdate()) else {
-                throw ChatError.noSuchRoom(roomID)
+        try await pool.withRepo { repo in
+            try await repo.transaction(isolation: .serializable, retryingOnSerializationFailure: 3) { tx in
+                guard let room = try await tx.one(Room.where { $0.id == roomID }.lockForUpdate()) else {
+                    throw ChatError.noSuchRoom(roomID)
+                }
+                guard let destination = try await tx.one(Room.where { $0.id == destinationID }) else {
+                    throw ChatError.noSuchRoom(destinationID)
+                }
+                let moved = try await tx.update(ChatMessage.where { $0.roomID == room.id }) {
+                    ($0.roomID.set(to: destination.id), $0.room.set(to: destination.slug))
+                }
+                _ = try await tx.update(Room.where { $0.id == room.id }) {
+                    $0.archived.set(to: true)
+                }
+                return moved
             }
-            guard let destination = try await tx.one(Room.where { $0.id == destinationID }) else {
-                throw ChatError.noSuchRoom(destinationID)
-            }
-            let moved = try await tx.update(ChatMessage.where { $0.roomID == room.id }) {
-                ($0.roomID.set(to: destination.id), $0.room.set(to: destination.slug))
-            }
-            _ = try await tx.update(Room.where { $0.id == room.id }) {
-                $0.archived.set(to: true)
-            }
-            return moved
         }
     }
 
@@ -2116,37 +2079,39 @@ struct ChatRepository: RoomStore {
     /// instead of unwinding an opaque closure. Everything runs in one
     /// transaction.
     func openRoom(slug: String, name: String, greeting: String) async throws -> Room {
-        let roomKey = MultiKey<Room>("room")
-        let greetingKey = MultiKey<ChatMessage>("greeting")
+        try await pool.withRepo { repo in
+            let roomKey = MultiKey<Room>("room")
+            let greetingKey = MultiKey<ChatMessage>("greeting")
 
-        let result = try await repo.run(
-            Multi()
-                .insert(
-                    roomKey,
-                    Changeset(Room.self)
-                        .change(\.slug, slug)
-                        .change(\.name, name)
-                        .change(\.archived, false)
-                        .change(\.createdAt, Date()))
-                .insert(greetingKey) { values in
-                    let room = try values[roomKey]
-                    return Changeset(ChatMessage.self)
-                        .change(\.room, room.slug)
-                        .change(\.roomID, room.id)
-                        .change(\.sender, "system")
-                        .change(\.body, greeting)
-                        .change(\.mentions, [])
-                        .change(\.redacted, false)
-                        .change(\.sentAt, Date())
-                })
+            let result = try await repo.run(
+                Multi()
+                    .insert(
+                        roomKey,
+                        Changeset(Room.self)
+                            .change(\.slug, slug)
+                            .change(\.name, name)
+                            .change(\.archived, false)
+                            .change(\.createdAt, Date()))
+                    .insert(greetingKey) { values in
+                        let room = try values[roomKey]
+                        return Changeset(ChatMessage.self)
+                            .change(\.room, room.slug)
+                            .change(\.roomID, room.id)
+                            .change(\.sender, "system")
+                            .change(\.body, greeting)
+                            .change(\.mentions, [])
+                            .change(\.redacted, false)
+                            .change(\.sentAt, Date())
+                    })
 
-        switch result {
-        case .success(let values):
-            return try values[roomKey]
-        case .failure(let failure):
-            // Which step failed, not just that something did — the reason
-            // Multi is worth reaching for over a hand-written transaction.
-            throw ChatError.multiStepFailed(step: failure.key, underlying: failure.error)
+            switch result {
+            case .success(let values):
+                return try values[roomKey]
+            case .failure(let failure):
+                // Which step failed, not just that something did — the reason
+                // Multi is worth reaching for over a hand-written transaction.
+                throw ChatError.multiStepFailed(step: failure.key, underlying: failure.error)
+            }
         }
     }
 
@@ -2161,19 +2126,21 @@ struct ChatRepository: RoomStore {
     /// iterating later throws rather than reading from a connection some other
     /// query now owns.
     func export(roomID: UUID, into sink: @Sendable (ExportLine) -> Void) async throws -> Int {
-        try await repo.stream(
-            ChatMessage.where { $0.roomID == roomID }
-                .order { $0.sentAt.asc() }
-                .select(into: ExportLine.self) {
-                    (sentAt: $0.sentAt, sender: $0.sender, body: $0.body)
+        try await pool.withRepo { repo in
+            try await repo.stream(
+                ChatMessage.where { $0.roomID == roomID }
+                    .order { $0.sentAt.asc() }
+                    .select(into: ExportLine.self) {
+                        (sentAt: $0.sentAt, sender: $0.sender, body: $0.body)
+                    }
+            ) { rows in
+                var count = 0
+                for try await line in rows {
+                    sink(line)
+                    count += 1
                 }
-        ) { rows in
-            var count = 0
-            for try await line in rows {
-                sink(line)
-                count += 1
+                return count
             }
-            return count
         }
     }
 
@@ -2187,10 +2154,12 @@ struct ChatRepository: RoomStore {
     /// and a value whose shape doesn't match the column's type throws
     /// `invalidFilterValue`. Values are always bound, never interpolated.
     func search(_ filters: [String: DynamicFilterValue], limit: Int = 50) async throws -> [ChatMessage] {
-        try await repo.all(
-            ChatMessage.where(dynamic: filters)
-                .order { $0.sentAt.desc() }
-                .limit(limit))
+        try await pool.withRepo { repo in
+            try await repo.all(
+                ChatMessage.where(dynamic: filters)
+                    .order { $0.sentAt.desc() }
+                    .limit(limit))
+        }
     }
 }
 
@@ -2231,53 +2200,70 @@ enum SignupError: Error, Sendable {
     case noLobby
 }
 
-@Repository(scope: .scoped)
+@Repository
 struct UserRepository: UserRepositoryProtocol {
-    // flight:hand-registered — resolved through FlightDataPostgres's
-    // ambient-scope overloads, not a scanned @Component.
-    @Autowired var repo: Repo   // the scope's connection-bound Hangar repo
+    /// The pool. Each method leases a connection for its own work and gives
+    /// it back; a unit of work that must share one connection says so by
+    /// putting every statement inside a single `withRepo`.
+    // flight:hand-registered — PostgresDataModule registers the pool.
+    @Inject var pool: PostgresDataSource
 
     func all() async throws -> [User] {
-        try await repo.all(User.all.order { $0.createdAt.desc() })
+        try await pool.withRepo { repo in
+            try await repo.all(User.all.order { $0.createdAt.desc() })
+        }
     }
 
     func find(byID id: UUID) async throws -> User? {
-        try await repo.one(User.where { $0.id == id })
+        try await pool.withRepo { repo in
+            try await repo.one(User.where { $0.id == id })
+        }
     }
 
     func find(byEmail email: String) async throws -> User? {
-        try await repo.one(User.where { $0.email == email })
-    }
-
-    /// Stage 7: atomic signup. The lobby announcement is written FIRST so a
-    /// duplicate-email failure on the user insert provably rolls it back —
-    /// the scoped `Repo` shares @Transactional's connection, so both writes
-    /// are inside the transaction.
-    @Transactional
-    func signup(name: String, email: String) async throws -> User {
-        // The lobby is a real row now, not a free-text label, so the
-        // announcement needs its id. Rooms are created by the migration's
-        // backfill and by ChatRepository.openRoom.
-        guard let lobby = try await repo.one(Room.where { $0.slug == "lobby" }) else {
-            throw SignupError.noLobby
+        try await pool.withRepo { repo in
+            try await repo.one(User.where { $0.email == email })
         }
-        try await repo.insert(
-            ChatMessage(
-                id: UUID(), room: lobby.slug, roomID: lobby.id, sender: "system",
-                body: "\(name) joined the demo", sentAt: Date()))
-        let now = Date()
-        return try await repo.insert(
-            User(id: UUID(), name: name, email: email, createdAt: now, updatedAt: now))
     }
 
-    /// Stage 8: dirty-column-only UPDATE (or INSERT) from a changeset —
-    /// identity decides which, exactly as the changeset design's driver
-    /// boundary specifies.
+    /// Atomic signup. The lobby announcement is written FIRST so a
+    /// duplicate-email failure on the user insert provably rolls it back.
+    ///
+    /// The transaction is Hangar's, and its extent is visible: one lease,
+    /// one `transaction { }`, both writes on the `tx` repo it hands you.
+    /// Using the outer `repo` inside would run that statement beside the
+    /// transaction rather than in it — which is why the closure gives you a
+    /// different one to use.
+    func signup(name: String, email: String) async throws -> User {
+        try await pool.withRepo { repo in
+            try await repo.transaction { tx in
+                // The lobby is a real row, not a free-text label, so the
+                // announcement needs its id. Rooms are created by the
+                // migration's backfill and by ChatRepository.openRoom.
+                guard let lobby = try await tx.one(Room.where { $0.slug == "lobby" }) else {
+                    throw SignupError.noLobby
+                }
+                try await tx.insert(
+                    ChatMessage(
+                        id: UUID(), room: lobby.slug, roomID: lobby.id, sender: "system",
+                        body: "\(name) joined the demo", sentAt: Date()))
+                let now = Date()
+                return try await tx.insert(
+                    User(id: UUID(), name: name, email: email, createdAt: now, updatedAt: now))
+            }
+        }
+    }
+
+    /// Dirty-column-only UPDATE (or INSERT) from a changeset — identity
+    /// decides which, exactly as the changeset design's driver boundary
+    /// specifies.
     func apply(_ changeset: Changeset<User>) async throws {
-        if changeset.original == nil {
-            try await repo.insert(changeset)
-        } else {
-            try await repo.update(changeset)
+        try await pool.withRepo { repo in
+            if changeset.original == nil {
+                _ = try await repo.insert(changeset)
+            } else {
+                _ = try await repo.update(changeset)
+            }
         }
     }
 }
@@ -2289,7 +2275,7 @@ import Foundation
 
 /// The seam `UserService` depends on instead of the concrete, Postgres-bound
 /// `UserRepository` — a struct wrapping a live scope can't be swapped out
-/// for anything; a protocol can. `UserService`'s `@Autowired var
+/// for anything; a protocol can. `UserService`'s `@Inject var
 /// repository: (any UserRepositoryProtocol)` still resolves through the
 /// ordinary `@Service` pipeline — the registration generator bridges this
 /// existential key to a real `UserRepository` (tests bridge it to a fake
@@ -2420,21 +2406,25 @@ import Foundation
 /// The cache is coalescing: if fifty requests miss the same key at once, one
 /// of them computes and the other forty-nine wait for that result instead of
 /// stampeding the database.
-/// Registered by hand in `AppModule` rather than scanned, because its
-/// dependency is the gateway rather than a component the container can wire
-/// on its own.
+@Service
 struct RoomDigestService: DigestInvalidating, DigestReading {
-    let chat: ChatGateway
+    /// The repository itself. It used to be a *gateway* around it: a
+    /// `.scoped` repository could not be captured by anything that outlives a
+    /// request, so a singleton held a container instead and opened a scope
+    /// per call. Repositories hold the pool now and lease per operation, so
+    /// the indirection has nothing left to do — a long-lived service can hold
+    /// one directly.
+    @Inject var chat: ChatRepository
 
     /// Cached per `minimumMessages` — the argument is part of the key, so
     /// `?min=3` and `?min=10` are different entries rather than one poisoning
     /// the other.
-    @Cacheable(namespace: "room-digest", ttl: .seconds(30))
+    @Cacheable(namespace: "room_digest", ttl: .seconds(30))
     func activity(minimumMessages: Int) async throws -> [RoomActivity] {
         try await chat.activity(minimumMessages: minimumMessages)
     }
 
-    @Cacheable(namespace: "room-digest", ttl: .seconds(30))
+    @Cacheable(namespace: "room_digest", ttl: .seconds(30))
     func headlines() async throws -> [RoomHeadline] {
         try await chat.headlines()
     }
@@ -2447,7 +2437,7 @@ struct RoomDigestService: DigestInvalidating, DigestReading {
     /// A 30-second TTL would eventually do this on its own. Evicting on write
     /// is what makes "post a message, reload the dashboard, see it" true
     /// immediately — the property a user would otherwise report as a bug.
-    @CacheEvict(namespace: "room-digest", allEntries: true)
+    @CacheEvict(namespace: "room_digest", allEntries: true)
     func messagesChanged() async {}
 }
 
@@ -2459,7 +2449,7 @@ import Foundation
 
 /// The business-logic layer between controllers and data access.
 ///
-/// `@Autowired` targets the existential `(any UserRepositoryProtocol)`
+/// `@Inject` targets the existential `(any UserRepositoryProtocol)`
 /// rather than the concrete `UserRepository` — the seam that makes this type
 /// unit-testable. Nothing bridges that key by hand anymore: the registration
 /// generator matches this demand against `UserRepository`'s conformance (its
@@ -2467,9 +2457,9 @@ import Foundation
 /// `flightRegisterAll`. Tests bypass `flightRegisterAll` and register a fake
 /// under the same key — see `UserServiceTests.swift` /
 /// `UserControllerTests.swift` for the two ends of the seam.
-@Service(scope: .scoped)
+@Service
 struct UserService {
-    @Autowired var repository: (any UserRepositoryProtocol)
+    @Inject var repository: (any UserRepositoryProtocol)
 
     func all() async throws -> [User] {
         try await repository.all()
@@ -2483,10 +2473,8 @@ struct UserService {
         try await repository.find(byEmail: email)
     }
 
-    /// The @Transactional boundary lives on the repository method; this just
-    /// forwards. `Transactions` middleware binds a coordinator around every
-    /// request, so this runs in a real transaction whenever it is called
-    /// from a handler — see `Web/Transactions.swift`.
+    /// The transaction boundary lives inside the repository method, where
+    /// the statements it covers are — this just validates and forwards.
     func signup(name: String, email: String) async throws -> User {
         let changeset = Changeset(User.self)
             .change(\.name, name)
@@ -2504,6 +2492,64 @@ struct UserService {
 }
 
 """#,
+            "Sources/App/Web/ErrorMapping.swift": #"""
+import FlightCore
+import FlightDataPostgres
+import FlightWeb
+
+/// One place where the error vocabularies this application *uses* but does
+/// not own become HTTP.
+///
+/// `HTTPErrorRepresentable` covers the errors you can conform; everything
+/// else renders as an opaque 500. That leaves exactly the types an
+/// application actually meets — `DataSourceError`, `HangarError`,
+/// `ChangesetValidationError` — with no HTTP shape, and they cannot be
+/// conformed here: they belong to other packages, and the packages below
+/// `FlightWeb` deliberately do not depend on it. A middleware cannot help
+/// either, because a handler's error is rendered by the router *inside* the
+/// chain — by the time middleware sees anything it is a finished 500.
+///
+/// So the application registers one mapper and says what it knows. Returning
+/// `nil` declines: that error follows the ordinary path.
+enum AppErrorMapping {
+    static func mapper() -> ErrorMapper {
+        ErrorMapper { error in
+            switch error {
+            case DataSourceError.poolExhausted:
+                // Saturation, not a bug. A 500 tells the client the opposite
+                // of the truth, which is "come back in a moment".
+                return .init(
+                    .serviceUnavailable, "The service is busy. Retry shortly.",
+                    headers: [.retryAfter: "1"])
+
+            case let invalid as ChangesetValidationError:
+                return .init(.unprocessableContent, invalid.description)
+
+            case HangarError.unknownFilterField(_, let field):
+                return .init(.badRequest, "unknown filter field '\(field)'")
+
+            case HangarError.invalidFilterValue(_, let field):
+                return .init(.badRequest, "filter '\(field)' has the wrong type for its column")
+
+            case ChatError.noSuchRoom(let id):
+                return .init(.notFound, "no room \(id)")
+
+            case ChatError.multiStepFailed(let step, let underlying):
+                // A `Multi` failure is a value carrying the step that broke,
+                // so the mapper can unwrap it and map what is inside.
+                if let inner = mapper().map(underlying) {
+                    return .init(inner.status, "step '\(step)': \(inner.message)", headers: inner.headers)
+                }
+                return .init(.internalServerError, "step '\(step)' failed")
+
+            default:
+                return nil
+            }
+        }
+    }
+}
+
+"""#,
             "Sources/App/Web/RequestLogging.swift": #"""
 import FlightCore
 import FlightWeb
@@ -2514,46 +2560,6 @@ struct RequestLogging: Sendable {
     func handle(_ context: RequestContext, next: Next) async throws -> Response {
         context.logger.info("→ \(context.request.method.rawValue) \(context.request.path)")
         return try await next(context)
-    }
-}
-
-"""#,
-            "Sources/App/Web/Transactions.swift": #"""
-import FlightCore
-import FlightDataPostgres
-import FlightWeb
-
-/// Binds `Scope.active` and the Postgres transaction coordinator around
-/// every request, so `@Transactional` means something.
-///
-/// Without this, a `@Transactional` method still *runs* — every write
-/// lands, nothing rolls back, and the guarantee in that method's own doc
-/// comment is quietly false. A demo application built on Flight shipped
-/// exactly that bug, in a single handler that forgot to bind a coordinator
-/// by hand; `@Middleware` exists so no handler has to remember to.
-@Middleware
-struct Transactions: Sendable {
-    @Autowired var container: Container
-
-    func handle(_ context: RequestContext, next: Next) async throws -> Response {
-        // Not for WebSocket upgrades — a request scope normally dies when
-        // the response is written, but an upgraded one lives as long as
-        // the socket, and binding here would check out a pool connection
-        // for as long as the tab stays open.
-        guard context.request.headers[.upgrade] == nil else {
-            return try await next(context)
-        }
-        do {
-            return try await container.withPostgresTransactions(in: context.scope) {
-                try await next(context)
-            }
-        } catch let error as DataSourceError {
-            context.logger.warning("pool exhausted: \(error)")
-            return Response.status(.serviceUnavailable).settingHeader(.retryAfter, "1")
-        } catch {
-            context.logger.error("could not bind transactions: \(error)")
-            return .status(.internalServerError)
-        }
     }
 }
 
@@ -2577,7 +2583,7 @@ struct CreateUsers: Migration {
         // map to columns with no case conversion, so a helper that generated
         // `created_at` would silently miss `createdAt` — spelled out instead.
         schema.createTable("users") { t in
-            t.uuid("id").primaryKey().default(.uuid)
+            t.uuid("id").primaryKey().default(.generatedUUID)
             t.varchar("name", limit: 30).notNull()
             t.varchar("email", limit: 50).notNull().unique()
             t.timestamptz("createdAt").notNull().default(.now)
@@ -2605,7 +2611,7 @@ struct CreateMessages: Migration {
 
     func up(_ schema: SchemaBuilder) {
         schema.createTable("messages") { t in
-            t.uuid("id").primaryKey().default(.uuid)
+            t.uuid("id").primaryKey().default(.generatedUUID)
             t.varchar("room", limit: 30).notNull()
             t.varchar("sender", limit: 50).notNull()
             t.text("body").notNull()
@@ -2632,7 +2638,7 @@ struct AddChatGraph: Migration {
 
     func up(_ schema: SchemaBuilder) {
         schema.createTable("rooms") { t in
-            t.uuid("id").primaryKey().default(.uuid)
+            t.uuid("id").primaryKey().default(.generatedUUID)
             t.varchar("slug", limit: 40).notNull().unique()
             t.varchar("name", limit: 80).notNull()
             t.boolean("archived").notNull().default(.bool(false))
@@ -2640,14 +2646,14 @@ struct AddChatGraph: Migration {
         }
 
         schema.createTable("topics") { t in
-            t.uuid("id").primaryKey().default(.uuid)
+            t.uuid("id").primaryKey().default(.generatedUUID)
             t.varchar("label", limit: 40).notNull().unique()
         }
 
         // The join table behind @HasMany(through:). Its own key plus a
         // uniqueness constraint on the pair: a message carries a topic once.
         schema.createTable("messageTopics") { t in
-            t.uuid("id").primaryKey().default(.uuid)
+            t.uuid("id").primaryKey().default(.generatedUUID)
             t.uuid("messageID").notNull().references("messages", "id", onDelete: .cascade)
             t.uuid("topicID").notNull().references("topics", "id", onDelete: .cascade)
             t.unique(["messageID", "topicID"])
@@ -3543,7 +3549,7 @@ struct FakeRepository: FlightModule {
 
     func configure(_ container: Container) throws {
         let repository = self.repository
-        container.register((any UserRepositoryProtocol).self, scope: .scoped) { _ in repository }
+        container.register((any UserRepositoryProtocol).self, scope: .singleton) { _ in repository }
     }
 }
 
@@ -3734,7 +3740,7 @@ let package = Package(
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // container and lifecycle.
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.7.0", traits: ["Web"])
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.14.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
@@ -3784,7 +3790,7 @@ struct HealthController {
     /// verifies the key exists — misspell it and the build fails, naming it.
     @ConfigValue("app.name") var appName: String
 
-    @GetMapping("/")
+    @GetRoute("/")
     func index(_ context: RequestContext) -> String {
         "\(appName) is flying"
     }
@@ -3799,7 +3805,6 @@ import FlightActuator
 import FlightCore
 import FlightTransport
 import FlightWeb
-import Foundation
 
 /// Your application's module: one place that says what this app is made of.
 ///
@@ -3825,34 +3830,20 @@ struct Main {
         // DAG configures, the container freezes, and only then does the
         // server start accepting requests. Nothing serves traffic against a
         // half-registered container.
-        do {
-            try await Flight.bootstrap(
-                configuration: try Configuration.load(),
-                modules: [
-                    FlightWebModule<FlightTransport>.self,
-                    AppModule.self,
-                    ActuatorModule.self,
-                ]
-            )
-        } catch {
-            // Not `main() async throws`. An error escaping `main` is reported
-            // by the Swift runtime as "Fatal error: Error raised at top
-            // level" followed by a register dump and a backtrace — which is
-            // what a new project sees when Postgres is not running or port
-            // 8080 is already bound. Those two deserve a line of text and a
-            // non-zero exit, not a crash report.
-            //
-            // `String(reflecting:)` rather than plain interpolation because
-            // PostgresNIO's `description` is deliberately redacted — it says
-            // "Generic description to prevent accidental leakage" and nothing
-            // about what went wrong. The reflected form names the host, the
-            // port and the errno. That is safe here specifically: this is a
-            // startup failure, so there are no user queries or bind values to
-            // leak, and the process is about to exit.
-            FileHandle.standardError.write(
-                Data("App failed to start: \(String(reflecting: error))\n".utf8))
-            exit(1)
-        }
+        //
+        // `Flight.run` rather than `main() async throws`: an error escaping
+        // `main` is reported by the Swift runtime as "Fatal error: Error
+        // raised at top level" followed by a register dump and a backtrace —
+        // which is what a new project sees when Postgres is not running or
+        // the port is already bound. `run` prints the reason and exits 1.
+        await Flight.run(
+            configuration: try Configuration.load(),
+            modules: [
+                FlightWebModule<FlightTransport>.self,
+                AppModule.self,
+                ActuatorModule.self,
+            ]
+        )
     }
 }
 
