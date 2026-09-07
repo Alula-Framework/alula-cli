@@ -21,6 +21,14 @@ struct SocketController {
     /// The same validator `AppModule` registers for HTTP requests. Injected
     /// rather than resolved from the context, so the dependency is visible in
     /// the type rather than discovered when the closure runs.
+    ///
+    /// The marker acknowledges that this one is registered by hand — the
+    /// bring-your-own-auth seam in `AppModule.configure` — rather than
+    /// scanned from an annotation. Without it the build warns, correctly:
+    /// the scanner cannot see a `container.register` call, so an unmarked
+    /// @Inject of a type it never found is usually a missing registration
+    /// that would fail at startup.
+    // flight:hand-registered
     @Inject var validator: any TokenValidator
 
     /// The upgrade request is where identity is established — before the
