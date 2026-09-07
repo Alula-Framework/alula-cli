@@ -25,9 +25,7 @@ struct UserServiceTests {
             createdAt: Date(), updatedAt: Date())
         let container = try makeContainer(repository: MockUserRepository(users: [ada]))
 
-        let found = try await container.withScope { scope in
-            try await container.resolve(UserService.self, in: scope).find(byID: ada.id)
-        }
+        let found = try await container.resolve(UserService.self).find(byID: ada.id)
 
         #expect(found == ada)
     }
@@ -36,9 +34,7 @@ struct UserServiceTests {
     func findByIDReturnsNilWhenMissing() async throws {
         let container = try makeContainer(repository: MockUserRepository())
 
-        let found = try await container.withScope { scope in
-            try await container.resolve(UserService.self, in: scope).find(byID: UUID())
-        }
+        let found = try await container.resolve(UserService.self).find(byID: UUID())
 
         #expect(found == nil)
     }
