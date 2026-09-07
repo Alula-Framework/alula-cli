@@ -10,7 +10,6 @@ import FlightSchedulerPostgres
 import FlightSecurityCore
 import FlightTransport
 import FlightWeb
-import Foundation
 
 /// Flight Security's `Principal` and Flight Channels' `ChannelPrincipal` are
 /// deliberately unrelated: Channels has no dependency on Security, so a
@@ -31,12 +30,13 @@ struct AppModule: FlightModule {
             FlightPresenceModule.self,
             FlightCacheModule.self,
             FlightSchedulerModule.self,
-            // FlightSecurityModule is deliberately NOT here. It installs its
-            // generic OIDC validator unless one is already registered, so it
-            // has to configure *after* this module rather than before it —
-            // which is what listing it later in `bootstrap` below achieves.
-            // Declaring it as a dependency would force the opposite order and
-            // fail the container freeze with a duplicate registration.
+            // Authentication wiring — the request-scoped principal and the
+            // `Authentication` middleware. It registers no validator: how
+            // tokens are validated is chosen by listing a module
+            // (`FlightOIDCModule`) or registering `(any TokenValidator)`
+            // yourself, as this application does below. Order does not
+            // matter, which is why this can simply be a dependency.
+            FlightSecurityModule.self,
         ]
     }
 
@@ -45,31 +45,26 @@ struct AppModule: FlightModule {
 
         // Order is declared once, here, top to bottom, outermost first —
         // RequestLogging sees the true wall-clock time of everything below
-        // it, and Transactions runs before anything that might write, so no
-        // handler can begin a unit of work with no coordinator bound.
+        // it.
         container.pipeline {
             RequestLogging.self
-            Transactions.self
         }
 
-        // The gateway, and the two things that depend on it. All three are
-        // singletons that never capture a request-scoped repository — they
-        // open a scope per call instead. See ChatGateway for why.
-        container.register(ChatGateway.self, scope: .singleton) { c in
-            ChatGateway(container: c)
+        // What a pool exhaustion, an invalid changeset or a bad dynamic
+        // filter look like on the wire. See Web/ErrorMapping.swift for why
+        // this cannot be done with a middleware.
+        container.register(ErrorMapper.self, scope: .singleton) { _ in
+            AppErrorMapping.mapper()
         }
+
+        // `ChatRepository` is the only conformer of `RoomStore` in this
+        // target, so anything injecting the protocol gets the bridge
+        // synthesized. The channel below resolves it by hand, at a point
+        // where there is no property to inject into, so the key is stated
+        // once here.
         container.register((any RoomStore).self, scope: .singleton) { c in
-            try c.resolve(ChatGateway.self)
+            try c.resolve(ChatRepository.self)
         }
-        container.register(RoomDigestService.self, scope: .singleton) { c in
-            RoomDigestService(chat: try c.resolve(ChatGateway.self))
-        }
-        // The read seam scheduled jobs depend on, so a job is testable
-        // without a cache or a database behind it.
-        container.register((any DigestReading).self, scope: .singleton) { c in
-            try c.resolve(RoomDigestService.self)
-        }
-
         // Makes `.once` mean once across every server rather than once per
         // server. This demo runs one process, where the coordinator changes
         // nothing — but registering it is the whole difference between a
@@ -86,13 +81,11 @@ struct AppModule: FlightModule {
                     PostgresDataSource.self, qualifier: PrimaryDataSource.name))
         }
 
-        // The bring-your-own-auth seam. FlightSecurityModule installs its
-        // generic OIDC validator only if none is registered by the time it
-        // configures — so this must run first, which is why that module is
-        // listed after this one in `bootstrap` rather than declared as a
-        // dependency of it.
+        // The bring-your-own-auth seam: `FlightSecurityModule` registers the
+        // authentication machinery but no validator, so this is the choice.
         //
-        // A real deployment deletes this and configures `security.oidc.*`.
+        // A real deployment deletes this and lists `FlightOIDCModule`
+        // instead, configured through `security.oidc.*`.
         container.register((any TokenValidator).self, scope: .singleton) { _ in
             DemoTokenValidator()
         }
@@ -126,37 +119,19 @@ struct Main {
         // Steps 1–3: Flight Config (flight.yaml + FLIGHT_* env). Steps 4–9:
         // container, module DAG, freeze, ServiceGroup — request serving
         // starts only after the whole DAG has registered.
-        do {
-            try await Flight.bootstrap(
-                configuration: try Configuration.load(),
-                modules: [
-                    FlightWebModule<FlightTransport>.self,  // choosing a transport = choosing a module
-                    AppModule.self,
-                    // After AppModule, so it finds the validator registered
-                    // above and stands down instead of installing the OIDC
-                    // default.
-                    FlightSecurityModule.self,
-                    ActuatorModule.self,
-                ]
-            )
-        } catch {
-            // Not `main() async throws`. An error escaping `main` is reported
-            // by the Swift runtime as "Fatal error: Error raised at top
-            // level" followed by a register dump and a backtrace — which is
-            // what a new project sees when Postgres is not running or port
-            // 8080 is already bound. Those two deserve a line of text and a
-            // non-zero exit, not a crash report.
-            //
-            // `String(reflecting:)` rather than plain interpolation because
-            // PostgresNIO's `description` is deliberately redacted — it says
-            // "Generic description to prevent accidental leakage" and nothing
-            // about what went wrong. The reflected form names the host, the
-            // port and the errno. That is safe here specifically: this is a
-            // startup failure, so there are no user queries or bind values to
-            // leak, and the process is about to exit.
-            FileHandle.standardError.write(
-                Data("App failed to start: \(String(reflecting: error))\n".utf8))
-            exit(1)
-        }
+        //
+        // `Flight.run` rather than `main() async throws`: an error escaping
+        // `main` is reported by the Swift runtime as "Fatal error: Error
+        // raised at top level" followed by a register dump and a backtrace —
+        // which is what a new project sees when Postgres is not running or
+        // the port is already bound. `run` prints the reason and exits 1.
+        await Flight.run(
+            configuration: try Configuration.load(),
+            modules: [
+                FlightWebModule<FlightTransport>.self,  // choosing a transport = choosing a module
+                AppModule.self,
+                ActuatorModule.self,
+            ]
+        )
     }
 }

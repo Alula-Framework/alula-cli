@@ -3,7 +3,7 @@ import Foundation
 
 /// The seam `UserService` depends on instead of the concrete, Postgres-bound
 /// `UserRepository` — a struct wrapping a live scope can't be swapped out
-/// for anything; a protocol can. `UserService`'s `@Autowired var
+/// for anything; a protocol can. `UserService`'s `@Inject var
 /// repository: (any UserRepositoryProtocol)` still resolves through the
 /// ordinary `@Service` pipeline — the registration generator bridges this
 /// existential key to a real `UserRepository` (tests bridge it to a fake

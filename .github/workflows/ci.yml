@@ -8,7 +8,22 @@ on:
   # Called by flight and flight-data so a breaking change there fails HERE,
   # on the pull request that caused it, rather than in a new user's first ten
   # minutes with a downloaded starter project.
+  #
+  # The caller passes the commit it wants the templates built against.
+  # Defaulting to `main` is what a standalone run of this workflow does, and
+  # it is also what made the first version of this wiring pointless: checking
+  # out `main` from a pull request's CI tests the branch that is already
+  # merged, not the change under review.
   workflow_call:
+    inputs:
+      flight_ref:
+        description: "The flight commit to build the templates against."
+        type: string
+        default: main
+      flight_data_ref:
+        description: "The flight-data commit to build the templates against."
+        type: string
+        default: main
   workflow_dispatch:
 
 concurrency:
@@ -53,12 +68,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Flight-Framework/flight
+          ref: ${{ inputs.flight_ref || 'main' }}
           token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
           path: flight
 
       - uses: actions/checkout@v4
         with:
           repository: Flight-Framework/flight-data
+          ref: ${{ inputs.flight_data_ref || 'main' }}
           token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
           path: flight-data
 

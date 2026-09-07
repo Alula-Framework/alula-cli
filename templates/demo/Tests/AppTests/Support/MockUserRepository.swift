@@ -50,6 +50,6 @@ struct FakeRepository: FlightModule {
 
     func configure(_ container: Container) throws {
         let repository = self.repository
-        container.register((any UserRepositoryProtocol).self, scope: .scoped) { _ in repository }
+        container.register((any UserRepositoryProtocol).self, scope: .singleton) { _ in repository }
     }
 }

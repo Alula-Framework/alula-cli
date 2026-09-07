@@ -40,10 +40,12 @@ adding a module to `bootstrap`, and the framework orders them. Choosing an
 HTTP transport is choosing a module. So is adding a database, a cache, or
 authentication.
 
-**Scopes are explicit.** A `.scoped` component lives for one request and holds
-one pooled database connection for that request. Resolving one outside a scope
-is an error rather than a silently new connection — which is what makes
-"which connection is this query on?" always answerable.
+**Borrowing is explicit.** Components are singletons. A repository holds the
+*pool* and leases a connection for exactly one operation — `withRepo` is that
+bracket, and the borrow ends when it returns. Statements that must share a
+connection, and therefore a transaction, go inside one bracket together, so
+"which connection is this query on?" is answered by code you can see rather
+than by a scope you cannot.
 
 ---
 
@@ -217,7 +219,7 @@ import FlightWeb
 struct HealthController {
     @ConfigValue("app.name") var appName: String
 
-    @GetMapping("/")
+    @GetRoute("/")
     func index(_ context: RequestContext) -> String {
         "\(appName) is flying"
     }
@@ -493,7 +495,7 @@ import Foundation
 struct CreateUsers: Migration {
     func up(_ schema: SchemaBuilder) {
         schema.createTable("users") { t in
-            t.uuid("id").primaryKey().default(.uuid)
+            t.uuid("id").primaryKey().default(.generatedUUID)
             t.varchar("name", limit: 30).notNull()
             t.varchar("email", limit: 50).notNull().unique()
             t.timestamptz("createdAt").notNull().default(.now)
@@ -560,20 +562,27 @@ Then the implementation, `Sources/App/Repos/UserRepository.swift`:
 import FlightDataPostgres
 import Foundation
 
-@Repository(scope: .scoped)
+@Repository
 struct UserRepository: UserRepositoryProtocol {
-    @Autowired var repo: Repo
+    // flight:hand-registered — PostgresDataModule registers the pool.
+    @Inject var pool: PostgresDataSource
 
     func all() async throws -> [User] {
-        try await repo.all(User.all.order { $0.createdAt.desc() })
+        try await pool.withRepo { repo in
+            try await repo.all(User.all.order { $0.createdAt.desc() })
+        }
     }
 
     func find(byID id: UUID) async throws -> User? {
-        try await repo.one(User.where { $0.id == id })
+        try await pool.withRepo { repo in
+            try await repo.one(User.where { $0.id == id })
+        }
     }
 
     func find(byEmail email: String) async throws -> User? {
-        try await repo.one(User.where { $0.email == email })
+        try await pool.withRepo { repo in
+            try await repo.one(User.where { $0.email == email })
+        }
     }
 
     func create(name: String, email: String) async throws -> User {
@@ -590,9 +599,12 @@ run the real controller, real routing, and real dependency injection with no
 database in the loop. Depend on the protocol everywhere except at
 registration.
 
-**Why `.scoped`?** One instance per request, holding one pooled connection for
-that request. Resolve one outside a scope and you get an error rather than a
-surprise connection.
+**Why hold the pool rather than a connection?** Because the borrow is then
+visible. `withRepo` leases for the length of its closure and returns the
+connection when it ends, so a slow handler holds one only while it is actually
+querying, and two statements share a connection exactly when you put them in
+one bracket. A repository that held a connection for the whole request made
+"how long is this borrowed for?" a question about a scope somewhere else.
 
 Finally, tell the container about Postgres — in `Main.swift`:
 
@@ -610,12 +622,12 @@ static var dependencies: [any FlightModule.Type] {
 @Controller
 struct UserController {
 
-    @GetMapping("/users")
+    @GetRoute("/users")
     func list(_ context: RequestContext) async throws -> [User] {
         try await context.resolve((any UserRepositoryProtocol).self).all()
     }
 
-    @GetMapping("/users/:id")
+    @GetRoute("/users/:id")
     func get(_ context: RequestContext) async throws -> User {
         guard let id = context.pathParam("id").flatMap({ UUID(uuidString: $0) }) else {
             throw HTTPError(.badRequest, "user id must be a UUID")
@@ -627,7 +639,7 @@ struct UserController {
         return user
     }
 
-    @PostMapping("/users")
+    @PostRoute("/users")
     func create(_ context: RequestContext, body: CreateUserRequest) async throws -> Response {
         let users = try context.resolve((any UserRepositoryProtocol).self)
 
@@ -735,7 +747,7 @@ one seam in a fully booted application uses `override`:
 let container = try TestContainer.build {
     AppModule()
 } overriding: { container in
-    container.override((any UserRepositoryProtocol).self, scope: .scoped) { _ in users }
+    container.override((any UserRepositoryProtocol).self, scope: .singleton) { _ in users }
 }
 ```
 
@@ -773,14 +785,14 @@ Add it when there is something to put in it — which Part 3 reaches almost
 immediately:
 
 ```swift
-@Service(scope: .scoped)
+@Service
 struct UserService {
-    @Autowired var repository: (any UserRepositoryProtocol)
+    @Inject var repository: (any UserRepositoryProtocol)
 
-    @Transactional
     func signup(name: String, email: String) async throws -> User {
-        // Validate, announce the signup, and create the user — one unit of
-        // work that either wholly happens or wholly does not.
+        // Validate, then hand one unit of work to the repository, which
+        // opens the transaction around both writes: it either wholly happens
+        // or wholly does not.
     }
 }
 ```
@@ -1013,7 +1025,7 @@ polled by dashboards, and both tolerate being a few seconds stale.
 ```swift
 @Service(scope: .singleton)
 struct RoomDigestService {
-    @Autowired var chat: ChatRepository
+    @Inject var chat: ChatRepository
 
     @Cacheable(namespace: "room-digest", ttl: .seconds(30))
     func activity(minimumMessages: Int) async throws -> [RoomActivity] {
@@ -1052,7 +1064,7 @@ Create `Sources/App/Jobs/ChatJobs.swift`:
 ```swift
 @Scheduler
 struct ChatJobs {
-    @Autowired var digests: RoomDigestService
+    @Inject var digests: RoomDigestService
 
     @Scheduled("0 0 3 * * *", timeZone: "UTC")
     func nightlySummary() async throws {
@@ -1071,7 +1083,7 @@ Add `FlightSchedulerModule.self` to `AppModule.dependencies` and that is the
 whole setup. Nothing registers `ChatJobs` by hand — the plugin found it, the
 same way it found your controllers.
 
-A `@Scheduler` type is an ordinary component. It injects with `@Autowired`
+A `@Scheduler` type is an ordinary component. It injects with `@Inject`
 like anything else, and its jobs are ordinary methods — so testing one needs
 no scheduler, no clock and no database, exactly like testing a service:
 
@@ -1096,7 +1108,7 @@ the same way for the same reason — see `ChatJobsTests`, which is the code
 above in full.
 
 Note that `ChatJobs` injects `(any DigestReading)` rather than
-`RoomDigestService`. The concrete service carries a live cache and a gateway
+`RoomDigestService`. The concrete service carries a live cache and a repository
 that needs Postgres; a three-method protocol needs neither. That is the same
 seam `RoomStore` and `DigestInvalidating` exist for, and it is what makes the
 test above two lines.
@@ -1285,8 +1297,8 @@ broadcasts nothing.
 | Build error naming a `@ConfigValue` key | The plugin checks keys without defaults against `flight.yaml` at build time. Add the key, or give it a `default:`. |
 | `migrate` cannot connect | `FLIGHT_DATABASE_URL` is unset in this shell. The CLI does not read `flight.yaml`. |
 | `checksum mismatch` from migrate | You edited a migration that already ran. Write a new one, or `migrate repair` if the edit was cosmetic. |
-| `noActiveScope` at runtime | A `.scoped` component was resolved outside any scope. Resolve via `context.resolve` in handlers. |
-| `poolExhausted` under load | Every concurrent request touching a repository holds a connection for its whole life. Raise `pool_size`, or shorten the unit of work. |
+| `poolExhausted` under load | More concurrent operations than the pool has connections, for longer than `checkout_timeout_ms`. Raise `pool_size`, shorten the bracket, or map the error to a 503 with an `ErrorMapper`. |
+| A streamed export starves other requests | `repo.stream` borrows a connection for its whole closure, and a slow client sets that length. Page the query, or give exports their own small pool. |
 | A join is rejected with `unauthenticated` | The socket connected without a `?token=`, or the validator rejected it. |
 | `swift run` says there are multiple executables | Name one: `swift run App`, `swift run migrate`. |
 | Port already bound | `FLIGHT_SERVER_PORT=9090 swift run App`. |

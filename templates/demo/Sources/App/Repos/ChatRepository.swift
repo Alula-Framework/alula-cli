@@ -65,11 +65,14 @@ struct ExportLine: Codable, Sendable {
 /// associations, joins (two-table, three-table, and a table joined to
 /// itself), aggregates, `DISTINCT ON`, set-based writes, upserts, row locks
 /// under a serializable transaction, `Multi`, and streaming.
-@Repository(scope: .scoped)
+@Repository
 struct ChatRepository: RoomStore {
-    // flight:hand-registered — resolved through FlightDataPostgres's
-    // ambient-scope overloads, not a scanned @Component.
-    @Autowired var repo: Repo
+    /// The pool. Every method below leases a connection for exactly its own
+    /// work through `withRepo` and gives it back — there is no request-scoped
+    /// connection, so "which connection is this query on" is answered by the
+    /// bracket you can see rather than by a scope you cannot.
+    // flight:hand-registered — PostgresDataModule registers the pool.
+    @Inject var pool: PostgresDataSource
 
     // MARK: Associations
 
@@ -82,16 +85,18 @@ struct ChatRepository: RoomStore {
     /// grow with the number of rows, which is the entire reason preloading
     /// exists instead of a lazy accessor.
     func room(slug: String, messageLimit: Int = 20) async throws -> Room? {
-        try await repo.one(
-            Room.where { $0.slug == slug }
-                .preload(\.messages) { messages in
-                    messages
-                        .where { $0.redacted == false }
-                        .order { $0.sentAt.desc() }
-                        .limit(messageLimit)
-                        .preload(\.author)
-                        .preload(\.topics)
-                })
+        try await pool.withRepo { repo in
+            try await repo.one(
+                Room.where { $0.slug == slug }
+                    .preload(\.messages) { messages in
+                        messages
+                            .where { $0.redacted == false }
+                            .order { $0.sentAt.desc() }
+                            .limit(messageLimit)
+                            .preload(\.author)
+                            .preload(\.topics)
+                    })
+        }
     }
 
     /// A user together with everything they wrote, newest first.
@@ -100,9 +105,11 @@ struct ChatRepository: RoomStore {
     /// is NULL for anyone who never registered. Those rows belong to no user
     /// and appear under none.
     func user(id: UUID, historyLimit: Int = 50) async throws -> User? {
-        try await repo.one(
-            User.where { $0.id == id }
-                .preload(\.authored) { $0.order { $0.sentAt.desc() }.limit(historyLimit) })
+        try await pool.withRepo { repo in
+            try await repo.one(
+                User.where { $0.id == id }
+                    .preload(\.authored) { $0.order { $0.sentAt.desc() }.limit(historyLimit) })
+        }
     }
 
     // MARK: Joins
@@ -116,18 +123,20 @@ struct ChatRepository: RoomStore {
     /// where is not a stylistic choice — an inner join here would silently
     /// drop those messages.
     func recentCards(limit: Int = 25) async throws -> [MessageCard] {
-        try await repo.all(
-            ChatMessage.join(Room.self, on: { message, room in message.roomID == room.id })
-                .leftJoin(User.self, on: { message, _, user in message.authorID == user.id })
-                .where { message, room, _ in message.redacted == false && room.archived == false }
-                .order { message, _, _ in message.sentAt.desc() }
-                .limit(limit)
-                .select(into: MessageCard.self) { message, room, user in
-                    (
-                        id: message.id, body: message.body, sentAt: message.sentAt,
-                        roomName: room.name, authorName: user.name
-                    )
-                })
+        try await pool.withRepo { repo in
+            try await repo.all(
+                ChatMessage.join(Room.self, on: { message, room in message.roomID == room.id })
+                    .leftJoin(User.self, on: { message, _, user in message.authorID == user.id })
+                    .where { message, room, _ in message.redacted == false && room.archived == false }
+                    .order { message, _, _ in message.sentAt.desc() }
+                    .limit(limit)
+                    .select(into: MessageCard.self) { message, room, user in
+                        (
+                            id: message.id, body: message.body, sentAt: message.sentAt,
+                            roomName: room.name, authorName: user.name
+                        )
+                    })
+        }
     }
 
     /// Replies paired with the messages they answer — one table joined to
@@ -139,18 +148,20 @@ struct ChatRepository: RoomStore {
     /// the aliases this is not a query Hangar will build — it refuses rather
     /// than emitting ambiguous SQL.
     func thread(rootID: UUID) async throws -> [ThreadEntry] {
-        let reply = ChatMessage.alias("reply")
-        let root = ChatMessage.alias("root")
-        return try await repo.all(
-            reply.join(root, on: { reply, root in reply.parentID == root.id })
-                .where { _, root in root.id == rootID }
-                .order { reply, _ in reply.sentAt.asc() }
-                .select(into: ThreadEntry.self) { reply, root in
-                    (
-                        replyID: reply.id, replyBody: reply.body,
-                        replySentAt: reply.sentAt, parentBody: root.body
-                    )
-                })
+        try await pool.withRepo { repo in
+            let reply = ChatMessage.alias("reply")
+            let root = ChatMessage.alias("root")
+            return try await repo.all(
+                reply.join(root, on: { reply, root in reply.parentID == root.id })
+                    .where { _, root in root.id == rootID }
+                    .order { reply, _ in reply.sentAt.asc() }
+                    .select(into: ThreadEntry.self) { reply, root in
+                        (
+                            replyID: reply.id, replyBody: reply.body,
+                            replySentAt: reply.sentAt, parentBody: root.body
+                        )
+                    })
+        }
     }
 
     // MARK: Aggregates
@@ -158,14 +169,16 @@ struct ChatRepository: RoomStore {
     /// Message counts per room, busiest first, quiet rooms filtered out
     /// *after* grouping — which is what HAVING is for.
     func activity(minimumMessages: Int = 1) async throws -> [RoomActivity] {
-        try await repo.all(
-            ChatMessage.where { $0.redacted == false }
-                .groupBy { $0.room }
-                .having { $0.id.count() >= minimumMessages }
-                .order { $0.room.asc() }
-                .select(into: RoomActivity.self) {
-                    (room: $0.room, messages: $0.id.count(), lastSentAt: $0.sentAt.max())
-                })
+        try await pool.withRepo { repo in
+            try await repo.all(
+                ChatMessage.where { $0.redacted == false }
+                    .groupBy { $0.room }
+                    .having { $0.id.count() >= minimumMessages }
+                    .order { $0.room.asc() }
+                    .select(into: RoomActivity.self) {
+                        (room: $0.room, messages: $0.id.count(), lastSentAt: $0.sentAt.max())
+                    })
+        }
     }
 
     /// The newest message in every room — one row per room, no subquery, no
@@ -177,14 +190,16 @@ struct ChatRepository: RoomStore {
     /// rejects the statement if it doesn't — the ordering is load-bearing, not
     /// cosmetic.
     func headlines() async throws -> [RoomHeadline] {
-        try await repo.all(
-            ChatMessage.all
-                .distinct(on: { $0.roomID })
-                .order { $0.roomID.asc() }
-                .order { $0.sentAt.desc() }
-                .select(into: RoomHeadline.self) {
-                    (roomID: $0.roomID, body: $0.body, sentAt: $0.sentAt)
-                })
+        try await pool.withRepo { repo in
+            try await repo.all(
+                ChatMessage.all
+                    .distinct(on: { $0.roomID })
+                    .order { $0.roomID.asc() }
+                    .order { $0.sentAt.desc() }
+                    .select(into: RoomHeadline.self) {
+                        (roomID: $0.roomID, body: $0.body, sentAt: $0.sentAt)
+                    })
+        }
     }
 
     // MARK: Set-based writes
@@ -195,17 +210,21 @@ struct ChatRepository: RoomStore {
     /// query per row and a race with anyone else writing. This is one
     /// statement, and it returns how many rows it touched.
     func redactAll(sender: String, inRoom roomID: UUID) async throws -> Int {
-        try await repo.update(
-            ChatMessage.where { $0.sender == sender && $0.roomID == roomID }
-        ) {
-            ($0.redacted.set(to: true), $0.body.set(to: "[redacted]"))
+        try await pool.withRepo { repo in
+            try await repo.update(
+                ChatMessage.where { $0.sender == sender && $0.roomID == roomID }
+            ) {
+                ($0.redacted.set(to: true), $0.body.set(to: "[redacted]"))
+            }
         }
     }
 
     /// Deletes every message older than a cutoff, in one DELETE. Returns the
     /// number removed.
     func purge(before cutoff: Date) async throws -> Int {
-        try await repo.delete(ChatMessage.where { $0.sentAt < cutoff })
+        try await pool.withRepo { repo in
+            try await repo.delete(ChatMessage.where { $0.sentAt < cutoff })
+        }
     }
 
     /// Sender names → user ids, in one query rather than one per name.
@@ -215,15 +234,19 @@ struct ChatRepository: RoomStore {
     /// result decodes straight into a dictionary. A sender who never
     /// registered is simply absent — which is what leaves `authorID` NULL.
     func authorIDs(forNames names: [String]) async throws -> [String: UUID] {
-        let pairs = try await repo.all(
-            User.where { $0.name.in(names) }.select { ($0.name, $0.id) })
-        return Dictionary(pairs, uniquingKeysWith: { first, _ in first })
+        try await pool.withRepo { repo in
+            let pairs = try await repo.all(
+                User.where { $0.name.in(names) }.select { ($0.name, $0.id) })
+            return Dictionary(pairs, uniquingKeysWith: { first, _ in first })
+        }
     }
 
     /// Inserts a batch of messages as one multi-row INSERT ... RETURNING —
     /// one round trip regardless of how many.
     func post(_ messages: [ChatMessage]) async throws -> [ChatMessage] {
-        try await repo.insert(messages)
+        try await pool.withRepo { repo in
+            try await repo.insert(messages)
+        }
     }
 
     /// Finds or creates a topic by label, without a read-then-write race.
@@ -232,6 +255,18 @@ struct ChatRepository: RoomStore {
     /// loses on the unique index. `ON CONFLICT ... DO UPDATE` makes the loser
     /// return the winning row instead of failing.
     func topic(label: String) async throws -> Topic {
+        try await pool.withRepo { repo in
+            try await Self.upsertTopic(label: label, on: repo)
+        }
+    }
+
+    /// The upsert both `topic` and `tag` need, taking a repo the caller
+    /// already holds.
+    ///
+    /// `tag` calling `topic(label:)` would lease a *second* connection while
+    /// still holding the first — which is how a small pool deadlocks under
+    /// load, and how a two-statement unit of work stops being one.
+    private static func upsertTopic(label: String, on repo: Repo) async throws -> Topic {
         let created = try await repo.insert(
             Changeset(Topic.self).change(\.label, label),
             onConflict: .doUpdate(target: [\Topic.label], set: [\Topic.label]))
@@ -247,13 +282,15 @@ struct ChatRepository: RoomStore {
     /// rather than an error — the join table's `UNIQUE (messageID, topicID)`
     /// is what makes `.doNothing` meaningful.
     func tag(messageID: UUID, label: String) async throws -> Topic {
-        let topic = try await self.topic(label: label)
-        _ = try await repo.insert(
-            Changeset(MessageTopic.self)
-                .change(\.messageID, messageID)
-                .change(\.topicID, topic.id),
-            onConflict: .doNothing(target: [\MessageTopic.messageID, \MessageTopic.topicID]))
-        return topic
+        try await pool.withRepo { repo in
+            let topic = try await Self.upsertTopic(label: label, on: repo)
+            _ = try await repo.insert(
+                Changeset(MessageTopic.self)
+                    .change(\.messageID, messageID)
+                    .change(\.topicID, topic.id),
+                onConflict: .doNothing(target: [\MessageTopic.messageID, \MessageTopic.topicID]))
+            return topic
+        }
     }
 
     // MARK: Transactions
@@ -273,20 +310,22 @@ struct ChatRepository: RoomStore {
     ///   Serializable without a retry is not a working design; the retry is
     ///   the other half of the feature.
     func archive(roomID: UUID, movingMessagesTo destinationID: UUID) async throws -> Int {
-        try await repo.transaction(isolation: .serializable, retryingOnSerializationFailure: 3) { tx in
-            guard let room = try await tx.one(Room.where { $0.id == roomID }.lockForUpdate()) else {
-                throw ChatError.noSuchRoom(roomID)
+        try await pool.withRepo { repo in
+            try await repo.transaction(isolation: .serializable, retryingOnSerializationFailure: 3) { tx in
+                guard let room = try await tx.one(Room.where { $0.id == roomID }.lockForUpdate()) else {
+                    throw ChatError.noSuchRoom(roomID)
+                }
+                guard let destination = try await tx.one(Room.where { $0.id == destinationID }) else {
+                    throw ChatError.noSuchRoom(destinationID)
+                }
+                let moved = try await tx.update(ChatMessage.where { $0.roomID == room.id }) {
+                    ($0.roomID.set(to: destination.id), $0.room.set(to: destination.slug))
+                }
+                _ = try await tx.update(Room.where { $0.id == room.id }) {
+                    $0.archived.set(to: true)
+                }
+                return moved
             }
-            guard let destination = try await tx.one(Room.where { $0.id == destinationID }) else {
-                throw ChatError.noSuchRoom(destinationID)
-            }
-            let moved = try await tx.update(ChatMessage.where { $0.roomID == room.id }) {
-                ($0.roomID.set(to: destination.id), $0.room.set(to: destination.slug))
-            }
-            _ = try await tx.update(Room.where { $0.id == room.id }) {
-                $0.archived.set(to: true)
-            }
-            return moved
         }
     }
 
@@ -298,37 +337,39 @@ struct ChatRepository: RoomStore {
     /// instead of unwinding an opaque closure. Everything runs in one
     /// transaction.
     func openRoom(slug: String, name: String, greeting: String) async throws -> Room {
-        let roomKey = MultiKey<Room>("room")
-        let greetingKey = MultiKey<ChatMessage>("greeting")
+        try await pool.withRepo { repo in
+            let roomKey = MultiKey<Room>("room")
+            let greetingKey = MultiKey<ChatMessage>("greeting")
 
-        let result = try await repo.run(
-            Multi()
-                .insert(
-                    roomKey,
-                    Changeset(Room.self)
-                        .change(\.slug, slug)
-                        .change(\.name, name)
-                        .change(\.archived, false)
-                        .change(\.createdAt, Date()))
-                .insert(greetingKey) { values in
-                    let room = try values[roomKey]
-                    return Changeset(ChatMessage.self)
-                        .change(\.room, room.slug)
-                        .change(\.roomID, room.id)
-                        .change(\.sender, "system")
-                        .change(\.body, greeting)
-                        .change(\.mentions, [])
-                        .change(\.redacted, false)
-                        .change(\.sentAt, Date())
-                })
+            let result = try await repo.run(
+                Multi()
+                    .insert(
+                        roomKey,
+                        Changeset(Room.self)
+                            .change(\.slug, slug)
+                            .change(\.name, name)
+                            .change(\.archived, false)
+                            .change(\.createdAt, Date()))
+                    .insert(greetingKey) { values in
+                        let room = try values[roomKey]
+                        return Changeset(ChatMessage.self)
+                            .change(\.room, room.slug)
+                            .change(\.roomID, room.id)
+                            .change(\.sender, "system")
+                            .change(\.body, greeting)
+                            .change(\.mentions, [])
+                            .change(\.redacted, false)
+                            .change(\.sentAt, Date())
+                    })
 
-        switch result {
-        case .success(let values):
-            return try values[roomKey]
-        case .failure(let failure):
-            // Which step failed, not just that something did — the reason
-            // Multi is worth reaching for over a hand-written transaction.
-            throw ChatError.multiStepFailed(step: failure.key, underlying: failure.error)
+            switch result {
+            case .success(let values):
+                return try values[roomKey]
+            case .failure(let failure):
+                // Which step failed, not just that something did — the reason
+                // Multi is worth reaching for over a hand-written transaction.
+                throw ChatError.multiStepFailed(step: failure.key, underlying: failure.error)
+            }
         }
     }
 
@@ -343,19 +384,21 @@ struct ChatRepository: RoomStore {
     /// iterating later throws rather than reading from a connection some other
     /// query now owns.
     func export(roomID: UUID, into sink: @Sendable (ExportLine) -> Void) async throws -> Int {
-        try await repo.stream(
-            ChatMessage.where { $0.roomID == roomID }
-                .order { $0.sentAt.asc() }
-                .select(into: ExportLine.self) {
-                    (sentAt: $0.sentAt, sender: $0.sender, body: $0.body)
+        try await pool.withRepo { repo in
+            try await repo.stream(
+                ChatMessage.where { $0.roomID == roomID }
+                    .order { $0.sentAt.asc() }
+                    .select(into: ExportLine.self) {
+                        (sentAt: $0.sentAt, sender: $0.sender, body: $0.body)
+                    }
+            ) { rows in
+                var count = 0
+                for try await line in rows {
+                    sink(line)
+                    count += 1
                 }
-        ) { rows in
-            var count = 0
-            for try await line in rows {
-                sink(line)
-                count += 1
+                return count
             }
-            return count
         }
     }
 
@@ -369,9 +412,11 @@ struct ChatRepository: RoomStore {
     /// and a value whose shape doesn't match the column's type throws
     /// `invalidFilterValue`. Values are always bound, never interpolated.
     func search(_ filters: [String: DynamicFilterValue], limit: Int = 50) async throws -> [ChatMessage] {
-        try await repo.all(
-            ChatMessage.where(dynamic: filters)
-                .order { $0.sentAt.desc() }
-                .limit(limit))
+        try await pool.withRepo { repo in
+            try await repo.all(
+                ChatMessage.where(dynamic: filters)
+                    .order { $0.sentAt.desc() }
+                    .limit(limit))
+        }
     }
 }

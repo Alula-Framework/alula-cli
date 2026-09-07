@@ -12,7 +12,7 @@ import Foundation
 /// difference is the only thing about scheduling that is genuinely hard.
 @Scheduler
 struct ChatJobs {
-    @Autowired var digests: (any DigestReading)
+    @Inject var digests: (any DigestReading)
 
     /// Runs once. Not once per server — once.
     ///

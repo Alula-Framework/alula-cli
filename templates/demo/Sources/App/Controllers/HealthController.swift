@@ -13,7 +13,7 @@ struct HealthController {
     /// verifies the key exists — misspell it and the build fails, naming it.
     @ConfigValue("app.name") var appName: String
 
-    @GetMapping("/")
+    @GetRoute("/")
     func index(_ context: RequestContext) -> String {
         "\(appName) is flying"
     }
@@ -22,7 +22,7 @@ struct HealthController {
     /// `pathParam` returns an optional because the route pattern and the
     /// handler are separate things, and a mismatch should be a 400 rather
     /// than a crash.
-    @GetMapping("/echo/:word")
+    @GetRoute("/echo/:word")
     func echo(_ context: RequestContext) async throws -> String {
         guard let word = context.pathParam("word") else {
             throw HTTPError(.badRequest, "a word is required")

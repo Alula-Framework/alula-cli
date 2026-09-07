@@ -10,12 +10,12 @@ struct CreateUserRequest: Codable {
 
 @Controller
 struct UserController {
-    @GetMapping("/users")
+    @GetRoute("/users")
     func listUsers(_ context: RequestContext) async throws -> [User] {
         try await context.resolve(UserService.self).all()
     }
 
-    @GetMapping("/user/:id")
+    @GetRoute("/user/:id")
     func getUser(_ context: RequestContext) async throws -> User {
         guard let id = context.pathParam("id").flatMap({ UUID(uuidString: $0) }) else {
             throw HTTPError(.badRequest, "user id must be a UUID")
@@ -26,19 +26,18 @@ struct UserController {
         return user
     }
 
-    /// `UserRepository.signup` is `@Transactional` and writes the lobby
-    /// announcement before the user, so a duplicate email has to roll the
-    /// announcement back. That guarantee depends on a coordinator being
-    /// bound around this call — which, since `Transactions` middleware
-    /// binds one around every request, this handler gets for free rather
-    /// than needing to ask for.
+    /// `UserRepository.signup` writes the lobby announcement before the
+    /// user, so a duplicate email has to roll the announcement back. The
+    /// transaction that makes that true is inside `signup` itself —
+    /// `repo.transaction { }` around both writes — so this handler has
+    /// nothing to bind and nothing to remember.
     ///
-    /// A demo application built on Flight shipped a route that forgot to
-    /// bind one by hand: every write still landed, nothing rolled back, and
-    /// the guarantee in `signup`'s own doc comment was quietly false.
-    /// `@Middleware` is what turned "every handler must remember" into
-    /// "nothing to remember" — see `Web/Transactions.swift`.
-    @PostMapping("/user")
+    /// It used to have both: an ambient coordinator, bound by a middleware,
+    /// which a handler could forget to bind. One that did shipped with every
+    /// write landing and nothing rolling back, and the guarantee in
+    /// `signup`'s own doc comment quietly false. A boundary you can see in
+    /// the code that opens it cannot be forgotten somewhere else.
+    @PostRoute("/user")
     func upsertUser(_ context: RequestContext, body: CreateUserRequest) async throws -> Response {
         context.logger.info("Creating user")
         let service = try context.resolve(UserService.self)
@@ -58,7 +57,7 @@ struct UserController {
         return try .json(created)
     }
 
-    @PostMapping("/chatUser")
+    @PostRoute("/chatUser")
     func createUser(_ context: RequestContext, body: CreateUserRequest) async throws -> Response {
         let service = try context.resolve(UserService.self)
         let user = try await service.signup(name: body.name, email: body.email)

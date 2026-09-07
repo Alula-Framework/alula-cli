@@ -25,7 +25,7 @@ struct AttachmentController {
         let bytes: Int
     }
 
-    @PostMapping("/attachments", maxBodyBytes: 64 << 20)
+    @PostRoute("/attachments", maxBodyBytes: 64 << 20)
     func upload(_ context: RequestContext, body: RequestBodyStream) async throws -> [Received] {
         var received: [Received] = []
         for try await part in try context.request.multipart() {

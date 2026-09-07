@@ -9,7 +9,7 @@ struct AddChatGraph: Migration {
 
     func up(_ schema: SchemaBuilder) {
         schema.createTable("rooms") { t in
-            t.uuid("id").primaryKey().default(.uuid)
+            t.uuid("id").primaryKey().default(.generatedUUID)
             t.varchar("slug", limit: 40).notNull().unique()
             t.varchar("name", limit: 80).notNull()
             t.boolean("archived").notNull().default(.bool(false))
@@ -17,14 +17,14 @@ struct AddChatGraph: Migration {
         }
 
         schema.createTable("topics") { t in
-            t.uuid("id").primaryKey().default(.uuid)
+            t.uuid("id").primaryKey().default(.generatedUUID)
             t.varchar("label", limit: 40).notNull().unique()
         }
 
         // The join table behind @HasMany(through:). Its own key plus a
         // uniqueness constraint on the pair: a message carries a topic once.
         schema.createTable("messageTopics") { t in
-            t.uuid("id").primaryKey().default(.uuid)
+            t.uuid("id").primaryKey().default(.generatedUUID)
             t.uuid("messageID").notNull().references("messages", "id", onDelete: .cascade)
             t.uuid("topicID").notNull().references("topics", "id", onDelete: .cascade)
             t.unique(["messageID", "topicID"])

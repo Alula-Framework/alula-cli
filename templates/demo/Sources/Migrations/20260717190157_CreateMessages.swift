@@ -9,7 +9,7 @@ struct CreateMessages: Migration {
 
     func up(_ schema: SchemaBuilder) {
         schema.createTable("messages") { t in
-            t.uuid("id").primaryKey().default(.uuid)
+            t.uuid("id").primaryKey().default(.generatedUUID)
             t.varchar("room", limit: 30).notNull()
             t.varchar("sender", limit: 50).notNull()
             t.text("body").notNull()

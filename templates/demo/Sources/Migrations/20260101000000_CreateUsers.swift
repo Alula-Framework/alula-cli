@@ -16,7 +16,7 @@ struct CreateUsers: Migration {
         // map to columns with no case conversion, so a helper that generated
         // `created_at` would silently miss `createdAt` — spelled out instead.
         schema.createTable("users") { t in
-            t.uuid("id").primaryKey().default(.uuid)
+            t.uuid("id").primaryKey().default(.generatedUUID)
             t.varchar("name", limit: 30).notNull()
             t.varchar("email", limit: 50).notNull().unique()
             t.timestamptz("createdAt").notNull().default(.now)

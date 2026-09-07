@@ -19,21 +19,25 @@ import Foundation
 /// The cache is coalescing: if fifty requests miss the same key at once, one
 /// of them computes and the other forty-nine wait for that result instead of
 /// stampeding the database.
-/// Registered by hand in `AppModule` rather than scanned, because its
-/// dependency is the gateway rather than a component the container can wire
-/// on its own.
+@Service
 struct RoomDigestService: DigestInvalidating, DigestReading {
-    let chat: ChatGateway
+    /// The repository itself. It used to be a *gateway* around it: a
+    /// `.scoped` repository could not be captured by anything that outlives a
+    /// request, so a singleton held a container instead and opened a scope
+    /// per call. Repositories hold the pool now and lease per operation, so
+    /// the indirection has nothing left to do — a long-lived service can hold
+    /// one directly.
+    @Inject var chat: ChatRepository
 
     /// Cached per `minimumMessages` — the argument is part of the key, so
     /// `?min=3` and `?min=10` are different entries rather than one poisoning
     /// the other.
-    @Cacheable(namespace: "room-digest", ttl: .seconds(30))
+    @Cacheable(namespace: "room_digest", ttl: .seconds(30))
     func activity(minimumMessages: Int) async throws -> [RoomActivity] {
         try await chat.activity(minimumMessages: minimumMessages)
     }
 
-    @Cacheable(namespace: "room-digest", ttl: .seconds(30))
+    @Cacheable(namespace: "room_digest", ttl: .seconds(30))
     func headlines() async throws -> [RoomHeadline] {
         try await chat.headlines()
     }
@@ -46,6 +50,6 @@ struct RoomDigestService: DigestInvalidating, DigestReading {
     /// A 30-second TTL would eventually do this on its own. Evicting on write
     /// is what makes "post a message, reload the dashboard, see it" true
     /// immediately — the property a user would otherwise report as a bug.
-    @CacheEvict(namespace: "room-digest", allEntries: true)
+    @CacheEvict(namespace: "room_digest", allEntries: true)
     func messagesChanged() async {}
 }

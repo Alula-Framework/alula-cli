@@ -92,7 +92,7 @@ private struct Fake: FlightModule {
 
     func configure(_ container: Container) throws {
         let users = self.users
-        container.register((any UserRepositoryProtocol).self, scope: .scoped) { _ in users }
+        container.register((any UserRepositoryProtocol).self, scope: .singleton) { _ in users }
     }
 }
 

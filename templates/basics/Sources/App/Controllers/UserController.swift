@@ -16,27 +16,30 @@ struct CreateUserRequest: Codable {
 @Controller
 struct UserController {
 
-    @GetMapping("/users")
+    /// The seam, not the concrete repository. Exactly one type in this
+    /// target conforms to it, so the registration generator synthesizes the
+    /// binding — nothing registers it by hand, and a test can register its
+    /// own fake under the same key.
+    @Inject var users: (any UserRepositoryProtocol)
+
+    @GetRoute("/users")
     func list(_ context: RequestContext) async throws -> [User] {
-        try await context.resolve((any UserRepositoryProtocol).self).all()
+        try await users.all()
     }
 
-    @GetMapping("/users/:id")
+    @GetRoute("/users/:id")
     func get(_ context: RequestContext) async throws -> User {
         guard let id = context.pathParam("id").flatMap({ UUID(uuidString: $0) }) else {
             throw HTTPError(.badRequest, "user id must be a UUID")
         }
-        let users = try context.resolve((any UserRepositoryProtocol).self)
         guard let user = try await users.find(byID: id) else {
             throw HTTPError(.notFound, "no user \(id)")
         }
         return user
     }
 
-    @PostMapping("/users")
+    @PostRoute("/users")
     func create(_ context: RequestContext, body: CreateUserRequest) async throws -> Response {
-        let users = try context.resolve((any UserRepositoryProtocol).self)
-
         // Validation runs before any SQL does: a changeset collects the
         // changes, checks them, and only a valid one reaches the database.
         let changeset = Changeset(User.self)

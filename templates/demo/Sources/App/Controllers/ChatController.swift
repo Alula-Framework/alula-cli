@@ -64,7 +64,7 @@ struct ChatController {
     /// author, and each message's topics, as one JSON document.
     ///
     /// Unloaded associations serialize as `null`; loaded ones as their value.
-    @GetMapping("/rooms/:slug")
+    @GetRoute("/rooms/:slug")
     func room(_ context: RequestContext) async throws -> Room {
         guard let slug = context.pathParam("slug") else {
             throw HTTPError(.badRequest, "room slug is required")
@@ -78,7 +78,7 @@ struct ChatController {
 
     /// `GET /users/:id/history` — a user with everything they wrote.
     /// The association crosses a nullable foreign key.
-    @GetMapping("/users/:id/history")
+    @GetRoute("/users/:id/history")
     func history(_ context: RequestContext) async throws -> User {
         let id = try context.uuidPathParam("id")
         let chat = try context.resolve(ChatRepository.self)
@@ -91,7 +91,7 @@ struct ChatController {
     // MARK: Joins
 
     /// `GET /messages/recent` — a three-table join, flattened.
-    @GetMapping("/messages/recent")
+    @GetRoute("/messages/recent")
     func recent(_ context: RequestContext) async throws -> [MessageCard] {
         let limit = context.request.queryParam("limit").flatMap(Int.init) ?? 25
         return try await context.resolve(ChatRepository.self).recentCards(limit: limit)
@@ -99,7 +99,7 @@ struct ChatController {
 
     /// `GET /messages/:id/thread` — `messages` joined to itself under two
     /// aliases, so each reply arrives next to the message it answers.
-    @GetMapping("/messages/:id/thread")
+    @GetRoute("/messages/:id/thread")
     func thread(_ context: RequestContext) async throws -> [ThreadEntry] {
         let id = try context.uuidPathParam("id")
         return try await context.resolve(ChatRepository.self).thread(rootID: id)
@@ -110,7 +110,7 @@ struct ChatController {
     /// `GET /activity?min=3` — GROUP BY with HAVING.
     /// Served from the cache when warm — see `RoomDigestService`. Posting a
     /// message evicts it, so the "post then reload" loop stays truthful.
-    @GetMapping("/activity")
+    @GetRoute("/activity")
     func activity(_ context: RequestContext) async throws -> [RoomActivity] {
         let minimum = context.request.queryParam("min").flatMap(Int.init) ?? 1
         return try await context.resolve(RoomDigestService.self)
@@ -118,7 +118,7 @@ struct ChatController {
     }
 
     /// `GET /headlines` — `DISTINCT ON`, one row per room.
-    @GetMapping("/headlines")
+    @GetRoute("/headlines")
     func headlines(_ context: RequestContext) async throws -> [RoomHeadline] {
         try await context.resolve(RoomDigestService.self).headlines()
     }
@@ -128,7 +128,7 @@ struct ChatController {
     /// `GET /messages/search?sender=ada&redacted=false` — every query
     /// parameter is checked against the allowlist on `ChatMessage` before it
     /// can affect the SQL. An unlisted field is a 400, not a silent no-op.
-    @GetMapping("/messages/search")
+    @GetRoute("/messages/search")
     func search(_ context: RequestContext) async throws -> [ChatMessage] {
         var filters: [String: DynamicFilterValue] = [:]
         for item in context.request.queryItems where item.name != "limit" {
@@ -158,7 +158,7 @@ struct ChatController {
     /// connections. It exists mostly so presence is observable with `curl`:
     /// the real consumers are WebSocket clients, which get a
     /// `flight:presence_state` on join and `flight:presence_diff`s after.
-    @GetMapping("/rooms/:slug/who")
+    @GetRoute("/rooms/:slug/who")
     func who(_ context: RequestContext) async throws -> Response {
         guard let slug = context.pathParam("slug") else {
             throw HTTPError(.badRequest, "room slug is required")
@@ -182,16 +182,13 @@ struct ChatController {
 
     /// `POST /rooms` — room and opening message as one named `Multi`.
     ///
-    /// `Transactions` middleware binds the `@Transactional` coordinator
-    /// around every request, this one included — but this handler never
-    /// calls a `@Transactional` method, so that binding just sits there
-    /// unused. Its own unit of work drives a transaction through Hangar
-    /// instead (`Multi` opens one of its own). What is genuinely a mistake
-    /// is a `@Transactional` method *also* using `Multi` in the same call —
-    /// neither coordinator sees the other's nesting — not the two merely
-    /// being present in the same request. `POST /chatUser` on
-    /// `UserController` is the other choice, made the other way.
-    @PostMapping("/rooms")
+    /// The unit of work is a `Multi`: steps decided before they run, named,
+    /// and executed in one transaction that Hangar opens. There is no
+    /// ambient coordinator to bind and nothing outside this call that could
+    /// be nesting a transaction around it — the boundary is the closure you
+    /// can see. `POST /chatUser` on `UserController` is the other shape,
+    /// where the transaction lives inside the repository method.
+    @PostRoute("/rooms")
     func openRoom(_ context: RequestContext, body: OpenRoomRequest) async throws -> Response {
         let chat = try context.resolve(ChatRepository.self)
         do {
@@ -204,7 +201,7 @@ struct ChatController {
     }
 
     /// `POST /messages` — a batch of messages as one multi-row INSERT.
-    @PostMapping("/messages")
+    @PostRoute("/messages")
     func post(_ context: RequestContext, body: PostMessagesRequest) async throws -> Response {
         let chat = try context.resolve(ChatRepository.self)
         guard let room = try await chat.room(slug: body.roomSlug, messageLimit: 0) else {
@@ -241,7 +238,7 @@ struct ChatController {
     }
 
     /// `POST /topics/:label` — find-or-create without a read-then-write race.
-    @PostMapping("/topics/:label")
+    @PostRoute("/topics/:label")
     func topic(_ context: RequestContext) async throws -> Topic {
         guard let label = context.pathParam("label") else {
             throw HTTPError(.badRequest, "topic label is required")
@@ -252,7 +249,7 @@ struct ChatController {
     /// `POST /messages/:id/topics/:label` — tag a message, creating the
     /// topic on first use. Preloading `\.topics` afterwards reads it back
     /// through the join table.
-    @PostMapping("/messages/:id/topics/:label")
+    @PostRoute("/messages/:id/topics/:label")
     func tag(_ context: RequestContext) async throws -> Topic {
         let id = try context.uuidPathParam("id")
         guard let label = context.pathParam("label") else {
@@ -263,7 +260,7 @@ struct ChatController {
 
     /// `POST /rooms/:slug/archive` — row lock inside a serializable
     /// transaction, retried on a serialization failure.
-    @PostMapping("/rooms/:slug/archive")
+    @PostRoute("/rooms/:slug/archive")
     func archive(_ context: RequestContext, body: ArchiveRoomRequest) async throws -> Response {
         guard let slug = context.pathParam("slug") else {
             throw HTTPError(.badRequest, "room slug is required")
@@ -293,7 +290,7 @@ struct ChatController {
     ///
     ///     curl -XPOST localhost:8080/messages/redact \
     ///          -H 'Authorization: Bearer demo:ada:moderator' ...
-    @PostMapping("/messages/redact")
+    @PostRoute("/messages/redact")
     func redact(_ context: RequestContext, body: RedactRequest) async throws -> Response {
         try context.requireRole("moderator")
         let chat = try context.resolve(ChatRepository.self)
@@ -306,7 +303,7 @@ struct ChatController {
 
     /// `DELETE /messages?before=<ISO8601>` — one DELETE over every matching
     /// row, returning how many went.
-    @DeleteMapping("/messages")
+    @DeleteRoute("/messages")
     func purge(_ context: RequestContext) async throws -> Response {
         try context.requireRole("moderator")
         guard let raw = context.request.queryParam("before"),
@@ -329,7 +326,7 @@ struct ChatController {
     /// handing the row stream straight to `Response.streaming` would need a
     /// connection that outlives the request scope, which is a different piece
     /// of plumbing than the one this endpoint is demonstrating.
-    @GetMapping("/rooms/:slug/export")
+    @GetRoute("/rooms/:slug/export")
     func export(_ context: RequestContext) async throws -> Response {
         guard let slug = context.pathParam("slug") else {
             throw HTTPError(.badRequest, "room slug is required")

@@ -13,7 +13,7 @@ struct HealthController {
     /// verifies the key exists — misspell it and the build fails, naming it.
     @ConfigValue("app.name") var appName: String
 
-    @GetMapping("/")
+    @GetRoute("/")
     func index(_ context: RequestContext) -> String {
         "\(appName) is flying"
     }
