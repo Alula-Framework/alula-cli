@@ -1262,7 +1262,7 @@ presence.
 ### Checkpoint
 
 ```bash
-swift test        # 24 tests, no database and no network required
+swift test        # 31 tests, no database and no network required
 ```
 
 That suite runs the real Channels router, the real PubSub fan-out, and the
