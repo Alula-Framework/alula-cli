@@ -101,15 +101,9 @@ struct AppModule: FlightModule {
                 digests: try c.resolve(RoomDigestService.self))
         }
 
-        // The upgrade request is where identity is established — before the
-        // WebSocket exists, while there is still an HTTP response to fail
-        // with. Browsers cannot set headers on a WebSocket handshake, so the
-        // token arrives as a query parameter; returning nil admits an
-        // anonymous socket, which every `join` here then rejects.
-        container.registerChannelSocket("/socket") { context in
-            guard let token = context.request.queryParam("token") else { return nil }
-            return try? await context.resolve((any TokenValidator).self).validate(token)
-        }
+        // The socket route itself is `SocketController`, declared with
+        // `@WebSocketRoute` rather than registered here — see that file for
+        // why a declared route beats a hand-registered one.
     }
 }
 
