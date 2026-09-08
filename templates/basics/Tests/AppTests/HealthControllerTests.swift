@@ -1,4 +1,5 @@
 import FlightCore
+import FlightDataPostgres
 import FlightWeb
 import FlightWebTesting
 import Testing
@@ -18,13 +19,18 @@ struct HealthControllerTests {
         // `configure` is registration only, no I/O — but the key must exist,
         // which is the point: a missing one fails at startup, not at the
         // first request that needed it.
-        let container = try TestContainer.build(
-            configuration: Configuration(values: [
-                "app.name": "TestApp",
-                "datasource.primary.url": "postgres://localhost/unused",
-            ])
-        ) {
-            AppModule()
+        let configuration = Configuration(values: [
+            "app.name": "TestApp",
+            "datasource.primary.url": "postgres://localhost/unused",
+        ])
+        // The composition root's sequence, by hand: the pool is a graph root,
+        // the graph is built from it, and AppModule registers from the graph.
+        let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
+        let container = try TestContainer.build(configuration: configuration) {
+            postgres
+            AppModule(
+                graph: try FlightGraph(
+                    configuration: configuration, postgresDataSource: postgres.dataSource))
         }
         let client = try TestClient(container: container)
 

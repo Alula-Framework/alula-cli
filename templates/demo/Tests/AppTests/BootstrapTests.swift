@@ -1,6 +1,7 @@
 import FlightActuator
 import FlightChannels
 import FlightCore
+import FlightDataPostgres
 import FlightPresence
 import FlightPubSub
 import FlightSecurityCore
@@ -34,9 +35,20 @@ struct BootstrapTests {
         // and Channels is built from PubSub's bus plus the channels AppModule
         // declares. The dependency walk cannot do this, which is the point —
         // it is composition, and it belongs in one place.
-        let app = AppModule()
+        // The composition root's own sequence, by hand: the pool and the
+        // validator are graph roots, the graph is built from them, and
+        // AppModule registers from the graph.
+        let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
+        let auth = DemoAuthModule()
+        let graph = try FlightGraph(
+            configuration: configuration,
+            postgresDataSource: postgres.dataSource,
+            tokenValidator: auth.tokenValidator)
+        let app = AppModule(graph: graph)
         let pubsub = try FlightPubSubModule(configuration: configuration)
         return try TestContainer.build(configuration: configuration) {
+            postgres
+            auth
             app
             FlightSecurityModule()
             ActuatorModule()

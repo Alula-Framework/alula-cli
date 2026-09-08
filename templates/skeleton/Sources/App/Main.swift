@@ -15,8 +15,27 @@ struct AppModule: FlightModule {
     /// for.
     static var dependencies: [any FlightModule.Type] { [] }
 
+
+    /// Every component, already built by the composition root. It used to be
+    /// constructed from the container at `freeze()`; the graph's roots are
+    /// things modules provide, so the place that assembles the modules is the
+    /// place that can build it.
+    let graph: FlightGraph
+
+    /// This module takes the graph, so it cannot be built from its type.
+    static var isTypeConstructible: Bool { false }
+
+    init(graph: FlightGraph) { self.graph = graph }
+
+    init() {
+        preconditionFailure(
+            "AppModule takes the component graph in init(graph:), so it cannot be instantiated "
+                + "from its type. `composedBy: flightComposeModules` builds the graph and passes "
+                + "it — Main.swift already does that.")
+    }
+
     func configure(_ container: Container) throws {
-        try flightRegisterAll(container)
+        try flightRegisterAll(container, graph: graph)
     }
 }
 
