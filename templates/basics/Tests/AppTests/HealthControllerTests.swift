@@ -26,13 +26,15 @@ struct HealthControllerTests {
         // The composition root's sequence, by hand: the pool is a graph root,
         // the graph is built from it, and AppModule registers from the graph.
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
+        let graph = try FlightGraph(
+            configuration: configuration, postgresDataSource: postgres.dataSource)
         let container = try TestContainer.build(configuration: configuration) {
             postgres
-            AppModule(
-                graph: try FlightGraph(
-                    configuration: configuration, postgresDataSource: postgres.dataSource))
+            AppModule(graph: graph)
         }
-        let client = try TestClient(container: container)
+        // Routes are values the composition root hands to `FlightWebModule`,
+        // so a client that serves them is handed the same list.
+        let client = try TestClient(container: container, routes: flightRoutes(graph))
 
         let response = await client.get("/")
 

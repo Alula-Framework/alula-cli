@@ -415,13 +415,15 @@ struct HealthControllerTests {
         // The composition root's sequence, by hand: the pool is a graph root,
         // the graph is built from it, and AppModule registers from the graph.
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
+        let graph = try FlightGraph(
+            configuration: configuration, postgresDataSource: postgres.dataSource)
         let container = try TestContainer.build(configuration: configuration) {
             postgres
-            AppModule(
-                graph: try FlightGraph(
-                    configuration: configuration, postgresDataSource: postgres.dataSource))
+            AppModule(graph: graph)
         }
-        let client = try TestClient(container: container)
+        // Routes are values the composition root hands to `FlightWebModule`,
+        // so a client that serves them is handed the same list.
+        let client = try TestClient(container: container, routes: flightRoutes(graph))
 
         let response = await client.get("/")
 
@@ -2985,7 +2987,7 @@ struct BootstrapTests {
             postgres
             auth
             app
-            FlightSecurityModule()
+            FlightSecurityModule(validator: auth.tokenValidator)
             ActuatorModule()
             pubsub
             try FlightChannelsModule(
@@ -4067,10 +4069,13 @@ struct HealthControllerTests {
         // The composition root's sequence, by hand: the graph is built first,
         // and AppModule registers from it.
         let configuration = Configuration(values: ["app.name": "TestApp"])
+        let graph = try FlightGraph(configuration: configuration)
         let container = try TestContainer.build(configuration: configuration) {
-            AppModule(graph: try FlightGraph(configuration: configuration))
+            AppModule(graph: graph)
         }
-        let client = try TestClient(container: container)
+        // Routes are values the composition root hands to `FlightWebModule`,
+        // so a client that serves them is handed the same list.
+        let client = try TestClient(container: container, routes: flightRoutes(graph))
 
         let response = await client.get("/")
 

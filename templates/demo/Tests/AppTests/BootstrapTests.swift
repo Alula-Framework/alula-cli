@@ -50,7 +50,7 @@ struct BootstrapTests {
             postgres
             auth
             app
-            FlightSecurityModule()
+            FlightSecurityModule(validator: auth.tokenValidator)
             ActuatorModule()
             pubsub
             try FlightChannelsModule(
