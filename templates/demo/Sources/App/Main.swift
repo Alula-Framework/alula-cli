@@ -26,6 +26,11 @@ struct AppModule: FlightModule {
         [
             PostgresDataModule<PrimaryDataSource>.self,
             FlightPubSubModule.self,
+            // Listed to *include* Channels in this application, not to order
+            // it: this module declares channels, so the composer builds
+            // Channels from them and therefore builds this module first. The
+            // two meanings `dependencies` used to carry are now separate —
+            // inclusion here, ordering from what each module takes.
             FlightChannelsModule.self,
             FlightPresenceModule.self,
             FlightCacheModule.self,
@@ -90,21 +95,30 @@ struct AppModule: FlightModule {
             DemoTokenValidator()
         }
 
-        // One registration serves every room. Patterns are exact, prefix
-        // wildcard, or catch-all, and the most specific match wins; a
-        // malformed or duplicate pattern fails bootstrap rather than a join.
-        container.registerChannel("room:*") { c in
-            RoomChannel(
-                broadcaster: try c.resolve(ChannelBroadcaster.self),
-                presence: try c.resolve((any Presence).self),
-                chat: try c.resolve((any RoomStore).self),
-                digests: try c.resolve(RoomDigestService.self))
-        }
-
         // The socket route itself is `SocketController`, declared with
         // `@WebSocketRoute` rather than registered here — see that file for
         // why a declared route beats a hand-registered one.
     }
+
+    /// One declaration serves every room. Patterns are exact, prefix
+    /// wildcard, or catch-all, and the most specific match wins; a malformed
+    /// or duplicate pattern fails composition rather than a join.
+    ///
+    /// A **value this module holds**, not a call into the container. The
+    /// composer collects `channels` from every module that declares any and
+    /// hands them to `FlightChannelsModule`, which is why this module no
+    /// longer lists Channels in `dependencies`: declaring a channel does not
+    /// require having a broadcaster, only creating one does — and that
+    /// happens per join, below, from the socket's own context.
+    let channels: [ChannelRegistration] = [
+        ChannelRegistration("room:*", source: "AppModule") { context in
+            RoomChannel(
+                broadcaster: try context.resolve(ChannelBroadcaster.self),
+                presence: try context.resolve((any Presence).self),
+                chat: try context.resolve((any RoomStore).self),
+                digests: try context.resolve(RoomDigestService.self))
+        }
+    ]
 }
 
 @main

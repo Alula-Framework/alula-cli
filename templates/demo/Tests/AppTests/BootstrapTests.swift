@@ -1,4 +1,5 @@
 import FlightActuator
+import FlightChannels
 import FlightCore
 import FlightPubSub
 import FlightSecurityCore
@@ -27,15 +28,20 @@ struct BootstrapTests {
             "app.name": "App",
             "datasource.primary.url": "postgres://localhost/unused",
         ])
+        // The same wiring `main`'s composition root performs, for the three
+        // modules that take what they provide: PubSub reads configuration,
+        // and Channels is built from PubSub's bus plus the channels AppModule
+        // declares. The dependency walk cannot do this, which is the point —
+        // it is composition, and it belongs in one place.
+        let app = AppModule()
+        let pubsub = try FlightPubSubModule(configuration: configuration)
         return try TestContainer.build(configuration: configuration) {
-            AppModule()
+            app
             FlightSecurityModule()
             ActuatorModule()
-            // A transitive dependency — the channels the demo's rooms run on
-            // need it. PubSub takes its configuration, so the dependency walk
-            // cannot build it; it is supplied here the same way `main`'s
-            // composition root supplies it.
-            try FlightPubSubModule(configuration: configuration)
+            pubsub
+            try FlightChannelsModule(
+                bus: pubsub.bus, configuration: configuration, channels: app.channels)
         }
     }
 

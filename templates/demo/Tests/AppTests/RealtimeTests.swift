@@ -28,6 +28,18 @@ private struct RealtimeModule: FlightModule {
 
     let store: FakeRoomStore
 
+    /// The same shape `AppModule` uses: the channel is a value this module
+    /// holds, so Channels is built *from* it rather than collecting it.
+    let channels: [ChannelRegistration] = [
+        ChannelRegistration("room:*", source: "RealtimeModule") { context in
+            RoomChannel(
+                broadcaster: try context.resolve(ChannelBroadcaster.self),
+                presence: try context.resolve((any Presence).self),
+                chat: try context.resolve((any RoomStore).self),
+                digests: NoopDigests())
+        }
+    ]
+
     /// `FlightModule` requires a no-argument init because bootstrap
     /// instantiates modules itself. `TestContainer.build` takes ready-made
     /// *instances* though, so the real initializer below is the one the suite
@@ -42,13 +54,6 @@ private struct RealtimeModule: FlightModule {
         container.register((any RoomStore).self, scope: .singleton) { _ in store }
         container.register((any TokenValidator).self, scope: .singleton) { _ in
             DemoTokenValidator()
-        }
-        container.registerChannel("room:*") { c in
-            RoomChannel(
-                broadcaster: try c.resolve(ChannelBroadcaster.self),
-                presence: try c.resolve((any Presence).self),
-                chat: try c.resolve((any RoomStore).self),
-                digests: NoopDigests())
         }
         // The real route, not a stand-in: `SocketController` is what the
         // application ships, so registering it here is what makes these
@@ -67,11 +72,16 @@ private struct Harness {
         let configuration = Configuration(values: [
             "flight.channels.heartbeat-check-interval-seconds": "0.05"
         ])
+        // The wiring, written out: PubSub's bus and this module's declared
+        // channels are what Channels is built from. Both take what they
+        // provide, so neither can be instantiated from its type.
+        let pubsub = try FlightPubSubModule(configuration: configuration)
+        let realtime = RealtimeModule(store: store)
         self.container = try TestContainer.build(configuration: configuration) {
-            // PubSub takes its configuration, so it is supplied rather than
-            // instantiated from its type by the dependency walk.
-            try FlightPubSubModule(configuration: configuration)
-            RealtimeModule(store: store)
+            pubsub
+            realtime
+            try FlightChannelsModule(
+                bus: pubsub.bus, configuration: configuration, channels: realtime.channels)
         }
         self.testClient = try TestClient(container: container)
     }
