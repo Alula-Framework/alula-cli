@@ -231,7 +231,13 @@ struct Main {
                 FlightWebModule<FlightTransport>.self,
                 AppModule.self,
                 ActuatorModule.self,
-            ]
+            ],
+            // Built by the plugin, in dependency order, from the list above:
+            // `modules:` says which subsystems this application includes,
+            // and this is how they are constructed. Without it Flight
+            // instantiates each from its type, which is why a module would
+            // have to be constructible with no arguments.
+            composedBy: flightComposeModules
         )
     }
 }
@@ -1678,6 +1684,11 @@ struct AppModule: FlightModule {
         [
             PostgresDataModule<PrimaryDataSource>.self,
             FlightPubSubModule.self,
+            // Listed to *include* Channels in this application, not to order
+            // it: this module declares channels, so the composer builds
+            // Channels from them and therefore builds this module first. The
+            // two meanings `dependencies` used to carry are now separate —
+            // inclusion here, ordering from what each module takes.
             FlightChannelsModule.self,
             FlightPresenceModule.self,
             FlightCacheModule.self,
@@ -1742,21 +1753,30 @@ struct AppModule: FlightModule {
             DemoTokenValidator()
         }
 
-        // One registration serves every room. Patterns are exact, prefix
-        // wildcard, or catch-all, and the most specific match wins; a
-        // malformed or duplicate pattern fails bootstrap rather than a join.
-        container.registerChannel("room:*") { c in
-            RoomChannel(
-                broadcaster: try c.resolve(ChannelBroadcaster.self),
-                presence: try c.resolve((any Presence).self),
-                chat: try c.resolve((any RoomStore).self),
-                digests: try c.resolve(RoomDigestService.self))
-        }
-
         // The socket route itself is `SocketController`, declared with
         // `@WebSocketRoute` rather than registered here — see that file for
         // why a declared route beats a hand-registered one.
     }
+
+    /// One declaration serves every room. Patterns are exact, prefix
+    /// wildcard, or catch-all, and the most specific match wins; a malformed
+    /// or duplicate pattern fails composition rather than a join.
+    ///
+    /// A **value this module holds**, not a call into the container. The
+    /// composer collects `channels` from every module that declares any and
+    /// hands them to `FlightChannelsModule`, which is why this module no
+    /// longer lists Channels in `dependencies`: declaring a channel does not
+    /// require having a broadcaster, only creating one does — and that
+    /// happens per join, below, from the socket's own context.
+    let channels: [ChannelRegistration] = [
+        ChannelRegistration("room:*", source: "AppModule") { context in
+            RoomChannel(
+                broadcaster: try context.resolve(ChannelBroadcaster.self),
+                presence: try context.resolve((any Presence).self),
+                chat: try context.resolve((any RoomStore).self),
+                digests: try context.resolve(RoomDigestService.self))
+        }
+    ]
 }
 
 @main
@@ -1777,7 +1797,13 @@ struct Main {
                 FlightWebModule<FlightTransport>.self,  // choosing a transport = choosing a module
                 AppModule.self,
                 ActuatorModule.self,
-            ]
+            ],
+            // Built by the plugin, in dependency order, from the list above:
+            // `modules:` says which subsystems this application includes,
+            // and this is how they are constructed. Without it Flight
+            // instantiates each from its type, which is why a module would
+            // have to be constructible with no arguments.
+            composedBy: flightComposeModules
         )
     }
 }
@@ -2853,7 +2879,9 @@ struct AttachmentControllerTests {
 """#,
             "Tests/AppTests/BootstrapTests.swift": #"""
 import FlightActuator
+import FlightChannels
 import FlightCore
+import FlightPubSub
 import FlightSecurityCore
 import FlightTransport
 import FlightWeb
@@ -2876,15 +2904,24 @@ struct BootstrapTests {
     /// Everything `main` passes to `Flight.bootstrap`, minus the transport —
     /// binding a socket is not what is under test here.
     private func boot() throws -> Container {
-        try TestContainer.build(
-            configuration: Configuration(values: [
-                "app.name": "App",
-                "datasource.primary.url": "postgres://localhost/unused",
-            ])
-        ) {
-            AppModule()
+        let configuration = Configuration(values: [
+            "app.name": "App",
+            "datasource.primary.url": "postgres://localhost/unused",
+        ])
+        // The same wiring `main`'s composition root performs, for the three
+        // modules that take what they provide: PubSub reads configuration,
+        // and Channels is built from PubSub's bus plus the channels AppModule
+        // declares. The dependency walk cannot do this, which is the point —
+        // it is composition, and it belongs in one place.
+        let app = AppModule()
+        let pubsub = try FlightPubSubModule(configuration: configuration)
+        return try TestContainer.build(configuration: configuration) {
+            app
             FlightSecurityModule()
             ActuatorModule()
+            pubsub
+            try FlightChannelsModule(
+                bus: pubsub.bus, configuration: configuration, channels: app.channels)
         }
     }
 
@@ -3074,6 +3111,18 @@ private struct RealtimeModule: FlightModule {
 
     let store: FakeRoomStore
 
+    /// The same shape `AppModule` uses: the channel is a value this module
+    /// holds, so Channels is built *from* it rather than collecting it.
+    let channels: [ChannelRegistration] = [
+        ChannelRegistration("room:*", source: "RealtimeModule") { context in
+            RoomChannel(
+                broadcaster: try context.resolve(ChannelBroadcaster.self),
+                presence: try context.resolve((any Presence).self),
+                chat: try context.resolve((any RoomStore).self),
+                digests: NoopDigests())
+        }
+    ]
+
     /// `FlightModule` requires a no-argument init because bootstrap
     /// instantiates modules itself. `TestContainer.build` takes ready-made
     /// *instances* though, so the real initializer below is the one the suite
@@ -3089,13 +3138,6 @@ private struct RealtimeModule: FlightModule {
         container.register((any TokenValidator).self, scope: .singleton) { _ in
             DemoTokenValidator()
         }
-        container.registerChannel("room:*") { c in
-            RoomChannel(
-                broadcaster: try c.resolve(ChannelBroadcaster.self),
-                presence: try c.resolve((any Presence).self),
-                chat: try c.resolve((any RoomStore).self),
-                digests: NoopDigests())
-        }
         // The real route, not a stand-in: `SocketController` is what the
         // application ships, so registering it here is what makes these
         // tests exercise the upgrade path users actually get.
@@ -3110,11 +3152,20 @@ private struct Harness {
 
     init(store: FakeRoomStore) throws {
         self.store = store
-        self.container = try TestContainer.build(
-            configuration: Configuration(values: [
-                "flight.channels.heartbeat-check-interval-seconds": "0.05"
-            ])
-        ) { RealtimeModule(store: store) }
+        let configuration = Configuration(values: [
+            "flight.channels.heartbeat-check-interval-seconds": "0.05"
+        ])
+        // The wiring, written out: PubSub's bus and this module's declared
+        // channels are what Channels is built from. Both take what they
+        // provide, so neither can be instantiated from its type.
+        let pubsub = try FlightPubSubModule(configuration: configuration)
+        let realtime = RealtimeModule(store: store)
+        self.container = try TestContainer.build(configuration: configuration) {
+            pubsub
+            realtime
+            try FlightChannelsModule(
+                bus: pubsub.bus, configuration: configuration, channels: realtime.channels)
+        }
         self.testClient = try TestClient(container: container)
     }
 
@@ -3882,7 +3933,13 @@ struct Main {
                 FlightWebModule<FlightTransport>.self,
                 AppModule.self,
                 ActuatorModule.self,
-            ]
+            ],
+            // Built by the plugin, in dependency order, from the list above:
+            // `modules:` says which subsystems this application includes,
+            // and this is how they are constructed. Without it Flight
+            // instantiates each from its type, which is why a module would
+            // have to be constructible with no arguments.
+            composedBy: flightComposeModules
         )
     }
 }
