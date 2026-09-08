@@ -912,17 +912,39 @@ container.registerChannel("room:*") { c in
         digests: try c.resolve(RoomDigestService.self))
 }
 
-container.registerChannelSocket("/socket") { context in
-    guard let token = context.request.queryParam("token") else { return nil }
-    return try? await context.resolve((any TokenValidator).self).validate(token)
+```
+
+The socket itself is a route, so it is declared like one, in
+[`SocketController.swift`](templates/demo/Sources/App/Controllers/SocketController.swift):
+
+```swift
+@Controller
+struct SocketController {
+    @Inject var validator: any TokenValidator
+
+    @WebSocketRoute("/socket")
+    func socket(_ context: RequestContext) async throws -> ChannelSocketHandler {
+        var principal: (any ChannelPrincipal)?
+        if let token = context.request.queryParam("token") {
+            principal = try? await validator.validate(token)
+        }
+        return try ChannelSocketHandler(context: context, principal: principal)
+    }
 }
 ```
 
 **Identity is established during the HTTP upgrade**, before the WebSocket
 exists — while there is still an HTTP response to fail with. The token
 arrives as a query parameter because browsers cannot set headers on a
-WebSocket handshake. Returning `nil` admits an anonymous socket, which every
-`join` below then rejects.
+WebSocket handshake. An anonymous socket is admitted deliberately, and every
+`join` below then rejects it.
+
+`container.registerChannelSocket("/socket")` does the same wiring in one
+line, and is what a test harness or a quick spike wants. Prefer the declared
+form in an application: a route registered from a module body is arbitrary
+Swift, so nothing can enumerate it at build time — it does not appear in the
+static route manifest, and the dependency it needs arrives through
+`context.resolve` rather than through the type.
 
 The channel itself, abridged from
 [`RoomChannel.swift`](templates/demo/Sources/App/Channels/RoomChannel.swift):
@@ -1262,7 +1284,7 @@ presence.
 ### Checkpoint
 
 ```bash
-swift test        # 24 tests, no database and no network required
+swift test        # 31 tests, no database and no network required
 ```
 
 That suite runs the real Channels router, the real PubSub fan-out, and the

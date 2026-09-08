@@ -50,10 +50,10 @@ private struct RealtimeModule: FlightModule {
                 chat: try c.resolve((any RoomStore).self),
                 digests: NoopDigests())
         }
-        container.registerChannelSocket("/socket") { context in
-            guard let token = context.request.queryParam("token") else { return nil }
-            return try? await context.resolve((any TokenValidator).self).validate(token)
-        }
+        // The real route, not a stand-in: `SocketController` is what the
+        // application ships, so registering it here is what makes these
+        // tests exercise the upgrade path users actually get.
+        try SocketController._flightRegister(container)
     }
 }
 

@@ -41,11 +41,18 @@ byte-for-byte what CI built and tested — with the target renamed to yours.
 ```bash
 flight migrate                    # apply everything pending
 flight migrate status             # what is applied, what is not
+flight migrate status --json      # the same, machine-readable
 flight migrate create AddPosts    # write a new timestamped migration
 flight migrate rollback           # revert the last one
+flight migrate rollback --steps 3
+flight migrate rollback --to 20260101000000
+flight migrate repair             # re-checksum an edited migration
 flight migrate --dry-run          # print the SQL without running it
 flight migrate --help             # the full option list
 ```
+
+The connection URL comes from `--database-url`, then `$FLIGHT_DATABASE_URL`,
+then `$DATABASE_URL`.
 
 Every argument is passed through to the project's migrate executable, so the
 whole command set is available and stays available — a flag added there works
@@ -92,8 +99,10 @@ prose that slowly stops matching the code.
 ```bash
 ./CI/verify-templates.sh            # build and test all three tiers
 ./CI/verify-templates.sh basics     # or just one
-./CI/verify-tutorial.sh             # check the tutorial still describes them
+./CI/verify-tutorial.sh             # every path, symbol and type the tutorial names
+./CI/verify-checkpoints.sh          # run the tutorial's checkpoint commands for real
 ./CI/verify-generated-projects.sh   # build and test what `flight new` emits
+./CI/verify-migrate.sh              # the migrate command surface, end to end
 ./CI/generate-embedded-templates.sh # re-embed after changing templates/
 ```
 
@@ -108,7 +117,7 @@ and rewrites those to local paths before building, so the tiers can be
 checked against working copies of `flight` and `flight-data` — the templates
 themselves are never modified.
 
-CI runs both scripts, and `flight` and `flight-data` call this workflow, so a
+CI runs all of them, and `flight` and `flight-data` call this workflow, so a
 breaking change there fails on the pull request that caused it rather than in
 someone's first ten minutes with a downloaded project.
 

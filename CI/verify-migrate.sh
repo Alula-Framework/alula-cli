@@ -44,7 +44,7 @@ p = pathlib.Path(sys.argv[1]); t = p.read_text()
 t = t.replace("    func up(_ schema: SchemaBuilder) {\n",
               "    func up(_ schema: SchemaBuilder) {\n"
               '        schema.createTable("widgets") { t in\n'
-              '            t.uuid("id").primaryKey().default(.uuid)\n'
+              '            t.uuid("id").primaryKey().default(.generatedUUID)\n'
               "        }\n")
 t = t.replace("    func down(_ schema: SchemaBuilder) {\n",
               '    func down(_ schema: SchemaBuilder) {\n        schema.dropTable("widgets")\n')
