@@ -1,5 +1,6 @@
 import FlightActuator
 import FlightCore
+import FlightPubSub
 import FlightSecurityCore
 import FlightTransport
 import FlightWeb
@@ -22,15 +23,19 @@ struct BootstrapTests {
     /// Everything `main` passes to `Flight.bootstrap`, minus the transport —
     /// binding a socket is not what is under test here.
     private func boot() throws -> Container {
-        try TestContainer.build(
-            configuration: Configuration(values: [
-                "app.name": "App",
-                "datasource.primary.url": "postgres://localhost/unused",
-            ])
-        ) {
+        let configuration = Configuration(values: [
+            "app.name": "App",
+            "datasource.primary.url": "postgres://localhost/unused",
+        ])
+        return try TestContainer.build(configuration: configuration) {
             AppModule()
             FlightSecurityModule()
             ActuatorModule()
+            // A transitive dependency — the channels the demo's rooms run on
+            // need it. PubSub takes its configuration, so the dependency walk
+            // cannot build it; it is supplied here the same way `main`'s
+            // composition root supplies it.
+            try FlightPubSubModule(configuration: configuration)
         }
     }
 

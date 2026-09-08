@@ -64,11 +64,15 @@ private struct Harness {
 
     init(store: FakeRoomStore) throws {
         self.store = store
-        self.container = try TestContainer.build(
-            configuration: Configuration(values: [
-                "flight.channels.heartbeat-check-interval-seconds": "0.05"
-            ])
-        ) { RealtimeModule(store: store) }
+        let configuration = Configuration(values: [
+            "flight.channels.heartbeat-check-interval-seconds": "0.05"
+        ])
+        self.container = try TestContainer.build(configuration: configuration) {
+            // PubSub takes its configuration, so it is supplied rather than
+            // instantiated from its type by the dependency walk.
+            try FlightPubSubModule(configuration: configuration)
+            RealtimeModule(store: store)
+        }
         self.testClient = try TestClient(container: container)
     }
 
