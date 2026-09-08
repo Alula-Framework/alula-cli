@@ -901,18 +901,27 @@ internal service, wrong for an app whose reads are public.
 ## Stage 3.3 — A channel
 
 A `Channel` is per-topic server logic. Joining creates one instance per
-(socket, topic), so one registration serves every room:
+(socket, topic), so one declaration serves every room. A module *holds* its
+channels as a value:
 
 ```swift
-container.registerChannel("room:*") { c in
-    RoomChannel(
-        broadcaster: try c.resolve(ChannelBroadcaster.self),
-        presence: try c.resolve((any Presence).self),
-        chat: try c.resolve((any RoomStore).self),
-        digests: try c.resolve(RoomDigestService.self))
+struct AppModule: FlightModule {
+    let channels: [ChannelRegistration] = [
+        ChannelRegistration("room:*", source: "AppModule") { context in
+            RoomChannel(
+                broadcaster: try context.resolve(ChannelBroadcaster.self),
+                presence: try context.resolve((any Presence).self),
+                chat: try context.resolve((any RoomStore).self),
+                digests: try context.resolve(RoomDigestService.self))
+        }
+    ]
 }
-
 ```
+
+The composition root collects `channels` from every module that declares any
+and hands them to `FlightChannelsModule`, which builds its router from them —
+so a malformed or duplicate pattern fails at startup, and a package outside
+your application can contribute channels without you listing them anywhere.
 
 The socket itself is a route, so it is declared like one, in
 [`SocketController.swift`](templates/demo/Sources/App/Controllers/SocketController.swift):
