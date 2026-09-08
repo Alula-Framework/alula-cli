@@ -1758,7 +1758,21 @@ struct AppModule: FlightModule {
     /// This module takes the graph, so it cannot be built from its type.
     static var isTypeConstructible: Bool { false }
 
-    init(graph: FlightGraph) { self.graph = graph }
+    /// Makes `.once` mean once across every server rather than once per
+    /// server. This demo runs one process, where the coordinator changes
+    /// nothing — but providing it is the whole difference between a nightly
+    /// job that is safe to scale and one that is not, and the scheduler warns
+    /// at startup when it is missing.
+    ///
+    /// A value the composition root hands to `FlightSchedulerModule`. It used
+    /// to be a container registration the scheduler looked up, which meant a
+    /// deployment that forgot it degraded silently.
+    let jobCoordinator: any JobCoordinator
+
+    init(graph: FlightGraph) {
+        self.graph = graph
+        self.jobCoordinator = PostgresJobCoordinator(dataSource: graph.postgresDataSource)
+    }
 
     init() {
         preconditionFailure(
@@ -1791,21 +1805,6 @@ struct AppModule: FlightModule {
         // once here.
         container.register((any RoomStore).self, scope: .singleton) { c in
             try c.resolve(ChatRepository.self)
-        }
-        // Makes `.once` mean once across every server rather than once per
-        // server. This demo runs one process, where the coordinator changes
-        // nothing — but registering it is the whole difference between a
-        // nightly job that is safe to scale and one that is not, and the
-        // scheduler warns at startup when it is missing.
-        container.register((any JobCoordinator).self, scope: .singleton) { c in
-            // Qualified: data sources are registered under their name so an
-            // app with two databases can say which it means. A single-database
-            // app never writes the qualifier anywhere else — this is the one
-            // place that resolves the pool directly rather than through a
-            // scoped connection.
-            PostgresJobCoordinator(
-                dataSource: try c.resolve(
-                    PostgresDataSource.self, qualifier: PrimaryDataSource.name))
         }
 
 
