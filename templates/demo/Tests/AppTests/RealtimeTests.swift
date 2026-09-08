@@ -82,6 +82,12 @@ private struct Harness {
             realtime
             try FlightChannelsModule(
                 bus: pubsub.bus, configuration: configuration, channels: realtime.channels)
+            // No adapter: a single-node test. That is now stated rather than
+            // discovered by Presence probing the container for one.
+            try FlightPresenceModule(
+                configuration: configuration,
+                localBus: pubsub.local,
+                gossipBus: pubsub.bus)
         }
         self.testClient = try TestClient(container: container)
     }

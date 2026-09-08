@@ -1,6 +1,7 @@
 import FlightActuator
 import FlightChannels
 import FlightCore
+import FlightPresence
 import FlightPubSub
 import FlightSecurityCore
 import FlightTransport
@@ -42,6 +43,10 @@ struct BootstrapTests {
             pubsub
             try FlightChannelsModule(
                 bus: pubsub.bus, configuration: configuration, channels: app.channels)
+            try FlightPresenceModule(
+                configuration: configuration,
+                localBus: pubsub.local,
+                gossipBus: pubsub.bus)
         }
     }
 
