@@ -41,15 +41,3 @@ final class MockUserRepository: UserRepositoryProtocol, Sendable {
     }
 }
 
-/// Binds the fake under the same key the application binds the real
-/// repository under.
-struct FakeRepository: FlightModule {
-    let repository: MockUserRepository
-    init() { self.repository = MockUserRepository(users: []) }
-    init(_ repository: MockUserRepository) { self.repository = repository }
-
-    func configure(_ container: Container) throws {
-        let repository = self.repository
-        container.register((any UserRepositoryProtocol).self, scope: .singleton) { _ in repository }
-    }
-}

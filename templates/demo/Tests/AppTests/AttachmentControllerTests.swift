@@ -13,10 +13,9 @@ struct AttachmentControllerTests {
 
     @Test("a file and its form fields arrive, sizes intact")
     func uploadRoundTrip() async throws {
-        let container = try TestContainer.build {
-            Components(AttachmentController.self)
-        }
-        let client = try TestClient(container: container)
+        let client = try TestClient(routes: [
+            AttachmentController._flightRoute_upload_0 { _ in AttachmentController() }
+        ])
 
         let boundary = "----DemoBoundary"
         let filePayload = String(repeating: "b", count: 50_000)
@@ -51,10 +50,9 @@ struct AttachmentControllerTests {
 
     @Test("a body that is not multipart is refused as a 415")
     func nonMultipartRefused() async throws {
-        let container = try TestContainer.build {
-            Components(AttachmentController.self)
-        }
-        let client = try TestClient(container: container)
+        let client = try TestClient(routes: [
+            AttachmentController._flightRoute_upload_0 { _ in AttachmentController() }
+        ])
         let response = await client.post(
             "/attachments",
             headers: [.contentType: "application/json"],

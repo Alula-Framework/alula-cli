@@ -6,11 +6,10 @@ import Foundation
 ///
 /// `@Inject` targets the existential `(any UserRepositoryProtocol)`
 /// rather than the concrete `UserRepository` — the seam that makes this type
-/// unit-testable. Nothing bridges that key by hand anymore: the registration
-/// generator matches this demand against `UserRepository`'s conformance (its
-/// only scanned conformer) and synthesizes the bridge into
-/// `flightRegisterAll`. Tests bypass `flightRegisterAll` and register a fake
-/// under the same key — see `UserServiceTests.swift` /
+/// unit-testable. Nothing bridges that key by hand: the composition root
+/// matches this demand against `UserRepository`'s conformance (its only
+/// scanned conformer) and builds the service from it. Tests construct the
+/// service directly with a fake repository — see `UserServiceTests.swift` /
 /// `UserControllerTests.swift` for the two ends of the seam.
 @Service
 struct UserService {

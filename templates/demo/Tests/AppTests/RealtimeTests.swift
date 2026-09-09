@@ -21,23 +21,12 @@ import Testing
 /// This is the suite that proves the thing the demo previously only claimed —
 /// that a chat app built on Flight actually delivers messages and presence to
 /// the people in the room.
-private struct RealtimeModule: FlightModule {
-    static var dependencies: [any FlightModule.Type] {
-        [FlightChannelsModule.self, FlightPresenceModule.self]
-    }
-
+/// Holds the demo's room channel, built from a fake store and the shared
+/// presence — the same shape `AppModule`/`DemoChannelsModule` use, a value
+/// the channels module is built *from*.
+private struct RealtimeModule {
     let store: FakeRoomStore
-
-    /// The same shape `AppModule` uses: the channel is a value this module
-    /// holds, so Channels is built *from* it rather than collecting it.
     let channels: [ChannelRegistration]
-
-    /// `FlightModule` requires a no-argument init because bootstrap
-    /// instantiates modules itself. `TestContainer.build` takes ready-made
-    /// *instances* though, so the real initializer below is the one the suite
-    /// uses — and each test gets its own store, which matters because
-    /// swift-testing runs tests in parallel.
-    init() { preconditionFailure("RealtimeModule takes a store and presence.") }
 
     init(store: FakeRoomStore, presence: any Presence) {
         self.store = store
@@ -52,26 +41,13 @@ private struct RealtimeModule: FlightModule {
             }
         ]
     }
-
-    static var isTypeConstructible: Bool { false }
-
-    func configure(_ container: Container) throws {
-        let store = self.store
-        container.register((any RoomStore).self, scope: .singleton) { _ in store }
-        container.register((any TokenValidator).self, scope: .singleton) { _ in
-            DemoTokenValidator()
-        }
-        // The real route, not a stand-in: `SocketController` is what the
-        // application ships, so registering it here is what makes these
-        // tests exercise the upgrade path users actually get.
-        try SocketController._flightRegister(container)
-    }
 }
 
 private struct Harness {
-    let container: Container
     let testClient: TestClient
     let store: FakeRoomStore
+    /// The presence engine the room channel tracks into and the tests read.
+    let presence: any Presence
 
     init(store: FakeRoomStore) throws {
         self.store = store
@@ -79,22 +55,25 @@ private struct Harness {
             "flight.channels.heartbeat-check-interval-seconds": "0.05"
         ])
         // The wiring, written out: PubSub's bus and this module's declared
-        // channels are what Channels is built from. Both take what they
-        // provide, so neither can be instantiated from its type.
+        // channels are what Channels is built from.
         let pubsub = try FlightPubSubModule(configuration: configuration)
-        // No adapter: a single-node test. That is stated rather than
-        // discovered by Presence probing the container for one.
-        let presence = try FlightPresenceModule(
+        // No adapter: a single-node test, stated rather than discovered.
+        let presenceModule = try FlightPresenceModule(
             configuration: configuration, localBus: pubsub.local, gossipBus: pubsub.bus)
-        let realtime = RealtimeModule(store: store, presence: presence.presence)
-        self.container = try TestContainer.build(configuration: configuration) {
-            pubsub
-            presence
-            realtime
-            try FlightChannelsModule(
-                bus: pubsub.bus, configuration: configuration, channels: realtime.channels)
+        let presence = presenceModule.presence
+        let realtime = RealtimeModule(store: store, presence: presence)
+        let channels = try FlightChannelsModule(
+            bus: pubsub.bus, configuration: configuration, channels: realtime.channels)
+        // The real route the application ships (`SocketController`), built the
+        // way `flightRoutes` builds it: the validator by value, the channels
+        // stack from the channels module. This is what exercises the upgrade
+        // path users actually get.
+        let sockets = channels.sockets
+        let socketRoute = SocketController._flightRoute_socket_0 { _ in
+            SocketController(validator: DemoTokenValidator(), sockets: sockets)
         }
-        self.testClient = try TestClient(container: container)
+        self.testClient = try TestClient(routes: [socketRoute])
+        self.presence = presence
     }
 
     /// A client authenticated as `subject`. The token rides in the query
@@ -256,7 +235,7 @@ struct RealtimeTests {
     @Test("presence lists everyone in the room, and drops them when they go")
     func presenceTracksMembership() async throws {
         let harness = try Harness(store: FakeRoomStore(rooms: [.fixture(slug: "general")]))
-        let presence = try harness.container.resolve((any Presence).self)
+        let presence = harness.presence
 
         let ada = harness.client(as: "ada")
         try await ada.connect()
@@ -283,7 +262,7 @@ struct RealtimeTests {
     @Test("one identity in two tabs is one key with two metas")
     func oneIdentityManyConnections() async throws {
         let harness = try Harness(store: FakeRoomStore(rooms: [.fixture(slug: "general")]))
-        let presence = try harness.container.resolve((any Presence).self)
+        let presence = harness.presence
 
         let tabOne = harness.client(as: "ada")
         try await tabOne.connect()

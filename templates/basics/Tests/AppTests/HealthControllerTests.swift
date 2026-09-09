@@ -28,13 +28,9 @@ struct HealthControllerTests {
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
         let graph = try FlightGraph(
             configuration: configuration, postgresDataSource: postgres.dataSource)
-        let container = try TestContainer.build(configuration: configuration) {
-            postgres
-            AppModule(graph: graph)
-        }
         // Routes are values the composition root hands to `FlightWebModule`,
-        // so a client that serves them is handed the same list.
-        let client = try TestClient(container: container, routes: flightRoutes(graph))
+        // so a client that serves them is built from the same graph.
+        let client = try TestClient(routes: flightRoutes(graph))
 
         let response = await client.get("/")
 

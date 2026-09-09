@@ -13,16 +13,11 @@ struct HealthControllerTests {
 
     @Test("the index route answers with the configured application name")
     func index() async throws {
-        // The composition root's sequence, by hand: the graph is built first,
-        // and AppModule registers from it.
+        // The composition root's sequence, by hand: build the graph, then the
+        // routes from it — the values `FlightWebModule` is composed with.
         let configuration = Configuration(values: ["app.name": "TestApp"])
         let graph = try FlightGraph(configuration: configuration)
-        let container = try TestContainer.build(configuration: configuration) {
-            AppModule(graph: graph)
-        }
-        // Routes are values the composition root hands to `FlightWebModule`,
-        // so a client that serves them is handed the same list.
-        let client = try TestClient(container: container, routes: flightRoutes(graph))
+        let client = try TestClient(routes: flightRoutes(graph))
 
         let response = await client.get("/")
 
