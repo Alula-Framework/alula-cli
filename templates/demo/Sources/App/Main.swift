@@ -45,12 +45,6 @@ struct AppModule: FlightModule {
         [
             PostgresDataModule<PrimaryDataSource>.self,
             FlightPubSubModule.self,
-            // Listed to *include* Channels in this application, not to order
-            // it: this module declares channels, so the composer builds
-            // Channels from them and therefore builds this module first. The
-            // two meanings `dependencies` used to carry are now separate —
-            // inclusion here, ordering from what each module takes.
-            FlightChannelsModule.self,
             FlightPresenceModule.self,
             FlightCacheModule.self,
             FlightSchedulerModule.self,
@@ -128,25 +122,6 @@ struct AppModule: FlightModule {
         // why a declared route beats a hand-registered one.
     }
 
-    /// One declaration serves every room. Patterns are exact, prefix
-    /// wildcard, or catch-all, and the most specific match wins; a malformed
-    /// or duplicate pattern fails composition rather than a join.
-    ///
-    /// A **value this module holds**, not a call into the container. The
-    /// composer collects `channels` from every module that declares any and
-    /// hands them to `FlightChannelsModule`, which is why this module no
-    /// longer lists Channels in `dependencies`: declaring a channel does not
-    /// require having a broadcaster, only creating one does — and that
-    /// happens per join, below, from the socket's own context.
-    let channels: [ChannelRegistration] = [
-        ChannelRegistration("room:*", source: "AppModule") { context in
-            RoomChannel(
-                broadcaster: try context.resolve(ChannelBroadcaster.self),
-                presence: try context.resolve((any Presence).self),
-                chat: try context.resolve((any RoomStore).self),
-                digests: try context.resolve(RoomDigestService.self))
-        }
-    ]
 }
 
 @main
@@ -166,6 +141,7 @@ struct Main {
             modules: [
                 FlightWebModule<FlightTransport>.self,  // choosing a transport = choosing a module
                 DemoAuthModule.self,
+                DemoChannelsModule.self,
                 AppModule.self,
                 ActuatorModule.self,
             ],
@@ -177,4 +153,33 @@ struct Main {
             composedBy: flightComposeModules
         )
     }
+}
+
+/// The application's channels.
+///
+/// Their own module, for the same reason `DemoAuthModule` is: a socket route
+/// injects `ChannelSockets`, which makes it a root of the component graph —
+/// and a module that *provides* a graph root cannot also *take* the graph.
+/// `AppModule` takes it, so the channels move here. The build refuses the
+/// alternative by name, listing the cycle.
+struct DemoChannelsModule: FlightModule {
+    static var dependencies: [any FlightModule.Type] { [FlightChannelsModule.self] }
+
+    /// One declaration serves every room. Patterns are exact, prefix wildcard,
+    /// or catch-all, and the most specific match wins; a malformed or
+    /// duplicate pattern fails composition rather than a join.
+    ///
+    /// The composer collects `channels` from every module that declares any
+    /// and hands them to `FlightChannelsModule`.
+    let channels: [ChannelRegistration] = [
+        ChannelRegistration("room:*", source: "DemoChannelsModule") { context in
+            RoomChannel(
+                broadcaster: try context.resolve(ChannelBroadcaster.self),
+                presence: try context.resolve((any Presence).self),
+                chat: try context.resolve((any RoomStore).self),
+                digests: try context.resolve(RoomDigestService.self))
+        }
+    ]
+
+    func configure(_ container: Container) throws {}
 }

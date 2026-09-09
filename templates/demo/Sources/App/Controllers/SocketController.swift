@@ -31,6 +31,12 @@ struct SocketController {
     // flight:hand-registered
     @Inject var validator: any TokenValidator
 
+    /// The channels stack, injected as one value. It used to be built with
+    /// `ChannelSocketHandler(context:)`, which resolved the router, the bus
+    /// and the channels configuration out of every upgrade request — three
+    /// lookups of things the composition root wired at start-up.
+    @Inject var sockets: ChannelSockets
+
     /// The upgrade request is where identity is established — before the
     /// WebSocket exists, while there is still an HTTP response to fail with.
     /// Browsers cannot set headers on a WebSocket handshake, so the token
@@ -42,6 +48,6 @@ struct SocketController {
         if let token = context.request.queryParam("token") {
             principal = try? await validator.validate(token)
         }
-        return try ChannelSocketHandler(context: context, principal: principal)
+        return sockets.handler(principal: principal)
     }
 }

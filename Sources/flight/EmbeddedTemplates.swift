@@ -1404,6 +1404,12 @@ struct SocketController {
     // flight:hand-registered
     @Inject var validator: any TokenValidator
 
+    /// The channels stack, injected as one value. It used to be built with
+    /// `ChannelSocketHandler(context:)`, which resolved the router, the bus
+    /// and the channels configuration out of every upgrade request — three
+    /// lookups of things the composition root wired at start-up.
+    @Inject var sockets: ChannelSockets
+
     /// The upgrade request is where identity is established — before the
     /// WebSocket exists, while there is still an HTTP response to fail with.
     /// Browsers cannot set headers on a WebSocket handshake, so the token
@@ -1415,7 +1421,7 @@ struct SocketController {
         if let token = context.request.queryParam("token") {
             principal = try? await validator.validate(token)
         }
-        return try ChannelSocketHandler(context: context, principal: principal)
+        return sockets.handler(principal: principal)
     }
 }
 
@@ -1730,12 +1736,6 @@ struct AppModule: FlightModule {
         [
             PostgresDataModule<PrimaryDataSource>.self,
             FlightPubSubModule.self,
-            // Listed to *include* Channels in this application, not to order
-            // it: this module declares channels, so the composer builds
-            // Channels from them and therefore builds this module first. The
-            // two meanings `dependencies` used to carry are now separate —
-            // inclusion here, ordering from what each module takes.
-            FlightChannelsModule.self,
             FlightPresenceModule.self,
             FlightCacheModule.self,
             FlightSchedulerModule.self,
@@ -1813,25 +1813,6 @@ struct AppModule: FlightModule {
         // why a declared route beats a hand-registered one.
     }
 
-    /// One declaration serves every room. Patterns are exact, prefix
-    /// wildcard, or catch-all, and the most specific match wins; a malformed
-    /// or duplicate pattern fails composition rather than a join.
-    ///
-    /// A **value this module holds**, not a call into the container. The
-    /// composer collects `channels` from every module that declares any and
-    /// hands them to `FlightChannelsModule`, which is why this module no
-    /// longer lists Channels in `dependencies`: declaring a channel does not
-    /// require having a broadcaster, only creating one does — and that
-    /// happens per join, below, from the socket's own context.
-    let channels: [ChannelRegistration] = [
-        ChannelRegistration("room:*", source: "AppModule") { context in
-            RoomChannel(
-                broadcaster: try context.resolve(ChannelBroadcaster.self),
-                presence: try context.resolve((any Presence).self),
-                chat: try context.resolve((any RoomStore).self),
-                digests: try context.resolve(RoomDigestService.self))
-        }
-    ]
 }
 
 @main
@@ -1851,6 +1832,7 @@ struct Main {
             modules: [
                 FlightWebModule<FlightTransport>.self,  // choosing a transport = choosing a module
                 DemoAuthModule.self,
+                DemoChannelsModule.self,
                 AppModule.self,
                 ActuatorModule.self,
             ],
@@ -1862,6 +1844,35 @@ struct Main {
             composedBy: flightComposeModules
         )
     }
+}
+
+/// The application's channels.
+///
+/// Their own module, for the same reason `DemoAuthModule` is: a socket route
+/// injects `ChannelSockets`, which makes it a root of the component graph —
+/// and a module that *provides* a graph root cannot also *take* the graph.
+/// `AppModule` takes it, so the channels move here. The build refuses the
+/// alternative by name, listing the cycle.
+struct DemoChannelsModule: FlightModule {
+    static var dependencies: [any FlightModule.Type] { [FlightChannelsModule.self] }
+
+    /// One declaration serves every room. Patterns are exact, prefix wildcard,
+    /// or catch-all, and the most specific match wins; a malformed or
+    /// duplicate pattern fails composition rather than a join.
+    ///
+    /// The composer collects `channels` from every module that declares any
+    /// and hands them to `FlightChannelsModule`.
+    let channels: [ChannelRegistration] = [
+        ChannelRegistration("room:*", source: "DemoChannelsModule") { context in
+            RoomChannel(
+                broadcaster: try context.resolve(ChannelBroadcaster.self),
+                presence: try context.resolve((any Presence).self),
+                chat: try context.resolve((any RoomStore).self),
+                digests: try context.resolve(RoomDigestService.self))
+        }
+    ]
+
+    func configure(_ container: Container) throws {}
 }
 
 """#,
@@ -2971,26 +2982,30 @@ struct BootstrapTests {
         // and Channels is built from PubSub's bus plus the channels AppModule
         // declares. The dependency walk cannot do this, which is the point —
         // it is composition, and it belongs in one place.
-        // The composition root's own sequence, by hand: the pool and the
-        // validator are graph roots, the graph is built from them, and
-        // AppModule registers from the graph.
+        // The composition root's own sequence, by hand. Everything that
+        // *provides* a graph root comes first — the pool, the validator, and
+        // Channels, whose `sockets` the socket controller injects — then the
+        // graph, then `AppModule`, which takes it.
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
         let auth = DemoAuthModule()
+        let pubsub = try FlightPubSubModule(configuration: configuration)
+        let demoChannels = DemoChannelsModule()
+        let channels = try FlightChannelsModule(
+            bus: pubsub.bus, configuration: configuration, channels: demoChannels.channels)
         let graph = try FlightGraph(
             configuration: configuration,
             postgresDataSource: postgres.dataSource,
+            channelSockets: channels.sockets,
             tokenValidator: auth.tokenValidator)
-        let app = AppModule(graph: graph)
-        let pubsub = try FlightPubSubModule(configuration: configuration)
         return try TestContainer.build(configuration: configuration) {
             postgres
             auth
-            app
+            pubsub
+            demoChannels
+            channels
+            AppModule(graph: graph)
             FlightSecurityModule(validator: auth.tokenValidator)
             ActuatorModule()
-            pubsub
-            try FlightChannelsModule(
-                bus: pubsub.bus, configuration: configuration, channels: app.channels)
             try FlightPresenceModule(
                 configuration: configuration,
                 localBus: pubsub.local,

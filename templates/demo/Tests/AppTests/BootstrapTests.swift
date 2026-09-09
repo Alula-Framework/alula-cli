@@ -35,26 +35,30 @@ struct BootstrapTests {
         // and Channels is built from PubSub's bus plus the channels AppModule
         // declares. The dependency walk cannot do this, which is the point —
         // it is composition, and it belongs in one place.
-        // The composition root's own sequence, by hand: the pool and the
-        // validator are graph roots, the graph is built from them, and
-        // AppModule registers from the graph.
+        // The composition root's own sequence, by hand. Everything that
+        // *provides* a graph root comes first — the pool, the validator, and
+        // Channels, whose `sockets` the socket controller injects — then the
+        // graph, then `AppModule`, which takes it.
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
         let auth = DemoAuthModule()
+        let pubsub = try FlightPubSubModule(configuration: configuration)
+        let demoChannels = DemoChannelsModule()
+        let channels = try FlightChannelsModule(
+            bus: pubsub.bus, configuration: configuration, channels: demoChannels.channels)
         let graph = try FlightGraph(
             configuration: configuration,
             postgresDataSource: postgres.dataSource,
+            channelSockets: channels.sockets,
             tokenValidator: auth.tokenValidator)
-        let app = AppModule(graph: graph)
-        let pubsub = try FlightPubSubModule(configuration: configuration)
         return try TestContainer.build(configuration: configuration) {
             postgres
             auth
-            app
+            pubsub
+            demoChannels
+            channels
+            AppModule(graph: graph)
             FlightSecurityModule(validator: auth.tokenValidator)
             ActuatorModule()
-            pubsub
-            try FlightChannelsModule(
-                bus: pubsub.bus, configuration: configuration, channels: app.channels)
             try FlightPresenceModule(
                 configuration: configuration,
                 localBus: pubsub.local,
