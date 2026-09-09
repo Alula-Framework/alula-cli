@@ -622,9 +622,15 @@ static var dependencies: [any FlightModule.Type] {
 @Controller
 struct UserController {
 
+    /// A controller is constructed per request from the component graph, so
+    /// what it needs is a property the build wires — visible in the type,
+    /// checked when the application is composed, and with no per-request
+    /// lookup that could fail.
+    @Inject var users: any UserRepositoryProtocol
+
     @GetRoute("/users")
     func list(_ context: RequestContext) async throws -> [User] {
-        try await context.resolve((any UserRepositoryProtocol).self).all()
+        try await users.all()
     }
 
     @GetRoute("/users/:id")
@@ -632,7 +638,6 @@ struct UserController {
         guard let id = context.pathParam("id").flatMap({ UUID(uuidString: $0) }) else {
             throw HTTPError(.badRequest, "user id must be a UUID")
         }
-        let users = try context.resolve((any UserRepositoryProtocol).self)
         guard let user = try await users.find(byID: id) else {
             throw HTTPError(.notFound, "no user \(id)")
         }
@@ -641,7 +646,6 @@ struct UserController {
 
     @PostRoute("/users")
     func create(_ context: RequestContext, body: CreateUserRequest) async throws -> Response {
-        let users = try context.resolve((any UserRepositoryProtocol).self)
 
         let changeset = Changeset(User.self)
             .change(\.name, body.name)
@@ -1015,7 +1019,8 @@ does exactly that, so a message posted over HTTP reaches everyone currently
 watching over a socket:
 
 ```swift
-let broadcaster = try context.resolve(ChannelBroadcaster.self)
+// `@Inject var broadcaster: ChannelBroadcaster` on the controller — the
+// composition root wires it, like everything else a handler needs.
 for message in stored {
     await broadcaster.broadcast(topic: "room:\(message.room)",
                                 event: "new_msg", payload: RoomChannel.wire(message))

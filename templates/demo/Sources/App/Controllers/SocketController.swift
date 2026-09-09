@@ -35,6 +35,7 @@ struct SocketController {
     /// `ChannelSocketHandler(context:)`, which resolved the router, the bus
     /// and the channels configuration out of every upgrade request — three
     /// lookups of things the composition root wired at start-up.
+    // flight:hand-registered
     @Inject var sockets: ChannelSockets
 
     /// The upgrade request is where identity is established — before the

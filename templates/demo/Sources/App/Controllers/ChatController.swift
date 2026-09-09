@@ -58,6 +58,21 @@ struct Occupant: Codable, Sendable, ResponseEncodable {
 @Controller
 struct ChatController {
 
+    /// Injected, not resolved. A controller is constructed per request from
+    /// the component graph, so what it needs is a property the build wires.
+    /// These were `context.resolve` calls in every method — a lookup per
+    /// request for values the composition root has held since start-up.
+    @Inject var chat: ChatRepository
+    @Inject var digests: RoomDigestService
+
+    /// Provided by `FlightPresenceModule` and `FlightChannelsModule` rather
+    /// than scanned from this target, so they are roots of the graph. The
+    /// marker says the scanner is right not to have found them.
+    // flight:hand-registered
+    @Inject var presence: any Presence
+    // flight:hand-registered
+    @Inject var broadcaster: ChannelBroadcaster
+
     // MARK: Associations
 
     /// `GET /rooms/:slug` — a room with a page of messages, each message's
@@ -69,7 +84,6 @@ struct ChatController {
         guard let slug = context.pathParam("slug") else {
             throw HTTPError(.badRequest, "room slug is required")
         }
-        let chat = try context.resolve(ChatRepository.self)
         guard let room = try await chat.room(slug: slug) else {
             throw HTTPError(.notFound, "no room '\(slug)'")
         }
@@ -81,7 +95,6 @@ struct ChatController {
     @GetRoute("/users/:id/history")
     func history(_ context: RequestContext) async throws -> User {
         let id = try context.uuidPathParam("id")
-        let chat = try context.resolve(ChatRepository.self)
         guard let user = try await chat.user(id: id) else {
             throw HTTPError(.notFound, "no user \(id)")
         }
@@ -94,7 +107,7 @@ struct ChatController {
     @GetRoute("/messages/recent")
     func recent(_ context: RequestContext) async throws -> [MessageCard] {
         let limit = context.request.queryParam("limit").flatMap(Int.init) ?? 25
-        return try await context.resolve(ChatRepository.self).recentCards(limit: limit)
+        return try await chat.recentCards(limit: limit)
     }
 
     /// `GET /messages/:id/thread` — `messages` joined to itself under two
@@ -102,7 +115,7 @@ struct ChatController {
     @GetRoute("/messages/:id/thread")
     func thread(_ context: RequestContext) async throws -> [ThreadEntry] {
         let id = try context.uuidPathParam("id")
-        return try await context.resolve(ChatRepository.self).thread(rootID: id)
+        return try await chat.thread(rootID: id)
     }
 
     // MARK: Aggregates
@@ -113,14 +126,13 @@ struct ChatController {
     @GetRoute("/activity")
     func activity(_ context: RequestContext) async throws -> [RoomActivity] {
         let minimum = context.request.queryParam("min").flatMap(Int.init) ?? 1
-        return try await context.resolve(RoomDigestService.self)
-            .activity(minimumMessages: minimum)
+        return try await digests.activity(minimumMessages: minimum)
     }
 
     /// `GET /headlines` — `DISTINCT ON`, one row per room.
     @GetRoute("/headlines")
     func headlines(_ context: RequestContext) async throws -> [RoomHeadline] {
-        try await context.resolve(RoomDigestService.self).headlines()
+        try await digests.headlines()
     }
 
     // MARK: Runtime-sourced filters
@@ -143,7 +155,7 @@ struct ChatController {
         }
         let limit = context.request.queryParam("limit").flatMap(Int.init) ?? 50
         do {
-            return try await context.resolve(ChatRepository.self).search(filters, limit: limit)
+            return try await chat.search(filters, limit: limit)
         } catch let error as HangarError {
             throw HTTPError(.badRequest, "\(error)")
         }
@@ -163,7 +175,6 @@ struct ChatController {
         guard let slug = context.pathParam("slug") else {
             throw HTTPError(.badRequest, "room slug is required")
         }
-        let presence = try context.resolve((any Presence).self)
         let entries = await presence.list(topic: "room:\(slug)")
         return try .json(
             entries.map { entry in
@@ -190,7 +201,6 @@ struct ChatController {
     /// where the transaction lives inside the repository method.
     @PostRoute("/rooms")
     func openRoom(_ context: RequestContext, body: OpenRoomRequest) async throws -> Response {
-        let chat = try context.resolve(ChatRepository.self)
         do {
             let room = try await chat.openRoom(
                 slug: body.slug, name: body.name, greeting: body.greeting)
@@ -203,7 +213,6 @@ struct ChatController {
     /// `POST /messages` — a batch of messages as one multi-row INSERT.
     @PostRoute("/messages")
     func post(_ context: RequestContext, body: PostMessagesRequest) async throws -> Response {
-        let chat = try context.resolve(ChatRepository.self)
         guard let room = try await chat.room(slug: body.roomSlug, messageLimit: 0) else {
             throw HTTPError(.notFound, "no room '\(body.roomSlug)'")
         }
@@ -224,7 +233,6 @@ struct ChatController {
         // another node — and PubSub delivers it. Without this, a message
         // posted over HTTP would be invisible to everyone currently watching
         // the room over a socket until they reloaded.
-        let broadcaster = try context.resolve(ChannelBroadcaster.self)
         for message in stored {
             await broadcaster.broadcast(
                 topic: "room:\(message.room)",
@@ -232,7 +240,7 @@ struct ChatController {
                 payload: RoomChannel.wire(message))
         }
         // The digests are derived from this table; a write makes them stale.
-        try await context.resolve(RoomDigestService.self).messagesChanged()
+        try await digests.messagesChanged()
 
         return try .json(stored, status: .created)
     }
@@ -243,7 +251,7 @@ struct ChatController {
         guard let label = context.pathParam("label") else {
             throw HTTPError(.badRequest, "topic label is required")
         }
-        return try await context.resolve(ChatRepository.self).topic(label: label)
+        return try await chat.topic(label: label)
     }
 
     /// `POST /messages/:id/topics/:label` — tag a message, creating the
@@ -255,7 +263,7 @@ struct ChatController {
         guard let label = context.pathParam("label") else {
             throw HTTPError(.badRequest, "topic label is required")
         }
-        return try await context.resolve(ChatRepository.self).tag(messageID: id, label: label)
+        return try await chat.tag(messageID: id, label: label)
     }
 
     /// `POST /rooms/:slug/archive` — row lock inside a serializable
@@ -265,7 +273,6 @@ struct ChatController {
         guard let slug = context.pathParam("slug") else {
             throw HTTPError(.badRequest, "room slug is required")
         }
-        let chat = try context.resolve(ChatRepository.self)
         guard let source = try await chat.room(slug: slug, messageLimit: 0),
             let destination = try await chat.room(slug: body.destinationSlug, messageLimit: 0)
         else {
@@ -293,7 +300,6 @@ struct ChatController {
     @PostRoute("/messages/redact")
     func redact(_ context: RequestContext, body: RedactRequest) async throws -> Response {
         try context.requireRole("moderator")
-        let chat = try context.resolve(ChatRepository.self)
         guard let room = try await chat.room(slug: body.roomSlug, messageLimit: 0) else {
             throw HTTPError(.notFound, "no room '\(body.roomSlug)'")
         }
@@ -311,8 +317,8 @@ struct ChatController {
         else {
             throw HTTPError(.badRequest, "before must be an ISO 8601 timestamp")
         }
-        let purged = try await context.resolve(ChatRepository.self).purge(before: cutoff)
-        try await context.resolve(RoomDigestService.self).messagesChanged()
+        let purged = try await chat.purge(before: cutoff)
+        try await digests.messagesChanged()
         return try .json(["purged": purged])
     }
 
@@ -331,7 +337,6 @@ struct ChatController {
         guard let slug = context.pathParam("slug") else {
             throw HTTPError(.badRequest, "room slug is required")
         }
-        let chat = try context.resolve(ChatRepository.self)
         guard let room = try await chat.room(slug: slug, messageLimit: 0) else {
             throw HTTPError(.notFound, "no room '\(slug)'")
         }

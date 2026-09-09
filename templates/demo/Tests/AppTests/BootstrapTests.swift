@@ -45,11 +45,15 @@ struct BootstrapTests {
         let demoChannels = DemoChannelsModule()
         let channels = try FlightChannelsModule(
             bus: pubsub.bus, configuration: configuration, channels: demoChannels.channels)
+        let presenceModule = try FlightPresenceModule(
+            configuration: configuration, localBus: pubsub.local, gossipBus: pubsub.bus)
         let graph = try FlightGraph(
             configuration: configuration,
             postgresDataSource: postgres.dataSource,
-            channelSockets: channels.sockets,
-            tokenValidator: auth.tokenValidator)
+            presence: presenceModule.presence,
+            channelBroadcaster: channels.broadcaster,
+            tokenValidator: auth.tokenValidator,
+            channelSockets: channels.sockets)
         return try TestContainer.build(configuration: configuration) {
             postgres
             auth
@@ -59,10 +63,7 @@ struct BootstrapTests {
             AppModule(graph: graph)
             FlightSecurityModule(validator: auth.tokenValidator)
             ActuatorModule()
-            try FlightPresenceModule(
-                configuration: configuration,
-                localBus: pubsub.local,
-                gossipBus: pubsub.bus)
+            presenceModule
         }
     }
 

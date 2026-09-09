@@ -10,9 +10,15 @@ struct CreateUserRequest: Codable {
 
 @Controller
 struct UserController {
+
+    /// Injected, not resolved. A controller is constructed per request from
+    /// the component graph, so what it needs is a property the build wires —
+    /// visible in the type, checked when the application is composed, and
+    /// free of a per-request lookup that could fail.
+    @Inject var users: UserService
     @GetRoute("/users")
     func listUsers(_ context: RequestContext) async throws -> [User] {
-        try await context.resolve(UserService.self).all()
+        try await users.all()
     }
 
     @GetRoute("/user/:id")
@@ -20,7 +26,7 @@ struct UserController {
         guard let id = context.pathParam("id").flatMap({ UUID(uuidString: $0) }) else {
             throw HTTPError(.badRequest, "user id must be a UUID")
         }
-        guard let user = try await context.resolve(UserService.self).find(byID: id) else {
+        guard let user = try await users.find(byID: id) else {
             throw HTTPError(.notFound, "no user \(id)")
         }
         return user
@@ -40,7 +46,7 @@ struct UserController {
     @PostRoute("/user")
     func upsertUser(_ context: RequestContext, body: CreateUserRequest) async throws -> Response {
         context.logger.info("Creating user")
-        let service = try context.resolve(UserService.self)
+        let service = users
 
         if let user = try await service.find(byEmail: body.email) {
             let changeset = Changeset(original: user)
@@ -59,7 +65,7 @@ struct UserController {
 
     @PostRoute("/chatUser")
     func createUser(_ context: RequestContext, body: CreateUserRequest) async throws -> Response {
-        let service = try context.resolve(UserService.self)
+        let service = users
         let user = try await service.signup(name: body.name, email: body.email)
         return try .json(user, status: .created)
     }
