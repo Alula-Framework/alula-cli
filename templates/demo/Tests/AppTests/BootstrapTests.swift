@@ -35,25 +35,24 @@ struct BootstrapTests {
         // and Channels is built from PubSub's bus plus the channels AppModule
         // declares. The dependency walk cannot do this, which is the point —
         // it is composition, and it belongs in one place.
-        // The composition root's own sequence, by hand. Everything that
-        // *provides* a graph root comes first — the pool, the validator, and
-        // Channels, whose `sockets` the socket controller injects — then the
-        // graph, then `AppModule`, which takes it.
+        // The composition root's own sequence, by hand, in the order the
+        // value flow forces: what the graph needs, then the graph, then what
+        // is built from it.
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
         let auth = DemoAuthModule()
         let pubsub = try FlightPubSubModule(configuration: configuration)
-        let demoChannels = DemoChannelsModule()
-        let channels = try FlightChannelsModule(
-            bus: pubsub.bus, configuration: configuration, channels: demoChannels.channels)
+        // Only what a *component* needs. Values a route terminal alone needs —
+        // the broadcaster, the socket stack, the validator — are parameters of
+        // `flightRoutes`, which is what keeps the graph free of Channels and
+        // so lets channels be built from the graph.
+        let graph = try FlightGraph(
+            configuration: configuration, postgresDataSource: postgres.dataSource)
         let presenceModule = try FlightPresenceModule(
             configuration: configuration, localBus: pubsub.local, gossipBus: pubsub.bus)
-        let graph = try FlightGraph(
-            configuration: configuration,
-            postgresDataSource: postgres.dataSource,
-            presence: presenceModule.presence,
-            channelBroadcaster: channels.broadcaster,
-            tokenValidator: auth.tokenValidator,
-            channelSockets: channels.sockets)
+        let demoChannels = DemoChannelsModule(
+            graph: graph, presence: presenceModule.presence)
+        let channels = try FlightChannelsModule(
+            bus: pubsub.bus, configuration: configuration, channels: demoChannels.channels)
         return try TestContainer.build(configuration: configuration) {
             postgres
             auth
@@ -87,6 +86,16 @@ struct BootstrapTests {
         // channels hold it, and it opens a scope per call.
         let container = try boot()
         #expect(throws: Never.self) { try container.resolve(RoomDigestService.self) }
-        #expect(throws: Never.self) { try container.resolve((any RoomStore).self) }
+        #expect(throws: Never.self) { try container.resolve(ChatRepository.self) }
+
+        // `(any RoomStore)` is deliberately *not* a component any more. The
+        // room channel used to resolve the protocol, so a bridge had to exist
+        // for it; the channel is now handed a `ChatRepository` and Swift
+        // converts it at the parameter. An existential nothing injects needs
+        // no registration — COMPOSITION-MIGRATION.md §3's "a concrete value
+        // passed into an `any P` parameter is the compiler's job".
+        #expect(throws: ResolutionError.self) {
+            _ = try container.resolve((any RoomStore).self)
+        }
     }
 }

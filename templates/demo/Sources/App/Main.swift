@@ -107,15 +107,6 @@ struct AppModule: FlightModule {
             AppErrorMapping.mapper()
         }
 
-        // `ChatRepository` is the only conformer of `RoomStore` in this
-        // target, so anything injecting the protocol gets the bridge
-        // synthesized. The channel below resolves it by hand, at a point
-        // where there is no property to inject into, so the key is stated
-        // once here.
-        container.register((any RoomStore).self, scope: .singleton) { c in
-            try c.resolve(ChatRepository.self)
-        }
-
 
         // The socket route itself is `SocketController`, declared with
         // `@WebSocketRoute` rather than registered here — see that file for
@@ -165,21 +156,47 @@ struct Main {
 struct DemoChannelsModule: FlightModule {
     static var dependencies: [any FlightModule.Type] { [FlightChannelsModule.self] }
 
+    /// Everything a room channel needs, closed over rather than looked up.
+    ///
+    /// Taking the graph is legal here precisely because the graph does *not*
+    /// depend on Channels: what a controller alone needs — the broadcaster,
+    /// the socket stack — is passed to the route terminals instead of stored
+    /// on the graph. Without that split this module could not exist.
+    /// Inputs, not outputs — deliberately not stored. A stored `presence`
+    /// would make this module *provide* `any Presence` alongside
+    /// `FlightPresenceModule`, and the build refuses that ambiguity by name.
+    /// What this module provides is `channels`.
+    static var isTypeConstructible: Bool { false }
+
+    init(graph: FlightGraph, presence: any Presence) {
+        let chat = graph.chatRepository
+        let digests = graph.roomDigestService
+        self.channels = [
+            // The broadcaster arrives per join, in the `ChannelContext`:
+            // Channels owns it and is built *from* this module, so it cannot
+            // be a construction-time dependency without a cycle.
+            ChannelRegistration("room:*", source: "DemoChannelsModule") { channel in
+                RoomChannel(
+                    broadcaster: channel.broadcaster,
+                    presence: presence,
+                    chat: chat,
+                    digests: digests)
+            }
+        ]
+    }
+
+    init() {
+        preconditionFailure(
+            "DemoChannelsModule takes the component graph in init(graph:presence:).")
+    }
+
     /// One declaration serves every room. Patterns are exact, prefix wildcard,
     /// or catch-all, and the most specific match wins; a malformed or
     /// duplicate pattern fails composition rather than a join.
     ///
     /// The composer collects `channels` from every module that declares any
     /// and hands them to `FlightChannelsModule`.
-    let channels: [ChannelRegistration] = [
-        ChannelRegistration("room:*", source: "DemoChannelsModule") { context in
-            RoomChannel(
-                broadcaster: try context.resolve(ChannelBroadcaster.self),
-                presence: try context.resolve((any Presence).self),
-                chat: try context.resolve((any RoomStore).self),
-                digests: try context.resolve(RoomDigestService.self))
-        }
-    ]
+    let channels: [ChannelRegistration]
 
     func configure(_ container: Container) throws {}
 }

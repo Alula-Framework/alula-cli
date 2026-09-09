@@ -910,15 +910,25 @@ channels as a value:
 
 ```swift
 struct AppModule: FlightModule {
-    let channels: [ChannelRegistration] = [
-        ChannelRegistration("room:*", source: "AppModule") { context in
-            RoomChannel(
-                broadcaster: try context.resolve(ChannelBroadcaster.self),
-                presence: try context.resolve((any Presence).self),
-                chat: try context.resolve((any RoomStore).self),
-                digests: try context.resolve(RoomDigestService.self))
-        }
-    ]
+    let channels: [ChannelRegistration]
+
+    init(graph: FlightGraph, presence: any Presence) {
+        let chat = graph.chatRepository
+        let digests = graph.roomDigestService
+        self.channels = [
+            // The broadcaster arrives per join, in the `ChannelContext`:
+            // Channels owns it and is built *from* this module, so it cannot
+            // be a construction-time dependency without a cycle. Everything
+            // else is closed over.
+            ChannelRegistration("room:*", source: "DemoChannelsModule") { channel in
+                RoomChannel(
+                    broadcaster: channel.broadcaster,
+                    presence: presence,
+                    chat: chat,
+                    digests: digests)
+            }
+        ]
+    }
 }
 ```
 

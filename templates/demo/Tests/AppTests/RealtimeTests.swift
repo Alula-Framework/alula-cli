@@ -30,24 +30,30 @@ private struct RealtimeModule: FlightModule {
 
     /// The same shape `AppModule` uses: the channel is a value this module
     /// holds, so Channels is built *from* it rather than collecting it.
-    let channels: [ChannelRegistration] = [
-        ChannelRegistration("room:*", source: "RealtimeModule") { context in
-            RoomChannel(
-                broadcaster: try context.resolve(ChannelBroadcaster.self),
-                presence: try context.resolve((any Presence).self),
-                chat: try context.resolve((any RoomStore).self),
-                digests: NoopDigests())
-        }
-    ]
+    let channels: [ChannelRegistration]
 
     /// `FlightModule` requires a no-argument init because bootstrap
     /// instantiates modules itself. `TestContainer.build` takes ready-made
     /// *instances* though, so the real initializer below is the one the suite
     /// uses — and each test gets its own store, which matters because
     /// swift-testing runs tests in parallel.
-    init() { self.store = FakeRoomStore() }
+    init() { preconditionFailure("RealtimeModule takes a store and presence.") }
 
-    init(store: FakeRoomStore) { self.store = store }
+    init(store: FakeRoomStore, presence: any Presence) {
+        self.store = store
+        self.channels = [
+            // The broadcaster arrives per join; everything else is closed over.
+            ChannelRegistration("room:*", source: "RealtimeModule") { channel in
+                RoomChannel(
+                    broadcaster: channel.broadcaster,
+                    presence: presence,
+                    chat: store,
+                    digests: NoopDigests())
+            }
+        ]
+    }
+
+    static var isTypeConstructible: Bool { false }
 
     func configure(_ container: Container) throws {
         let store = self.store
@@ -76,18 +82,17 @@ private struct Harness {
         // channels are what Channels is built from. Both take what they
         // provide, so neither can be instantiated from its type.
         let pubsub = try FlightPubSubModule(configuration: configuration)
-        let realtime = RealtimeModule(store: store)
+        // No adapter: a single-node test. That is stated rather than
+        // discovered by Presence probing the container for one.
+        let presence = try FlightPresenceModule(
+            configuration: configuration, localBus: pubsub.local, gossipBus: pubsub.bus)
+        let realtime = RealtimeModule(store: store, presence: presence.presence)
         self.container = try TestContainer.build(configuration: configuration) {
             pubsub
+            presence
             realtime
             try FlightChannelsModule(
                 bus: pubsub.bus, configuration: configuration, channels: realtime.channels)
-            // No adapter: a single-node test. That is now stated rather than
-            // discovered by Presence probing the container for one.
-            try FlightPresenceModule(
-                configuration: configuration,
-                localBus: pubsub.local,
-                gossipBus: pubsub.bus)
         }
         self.testClient = try TestClient(container: container)
     }
