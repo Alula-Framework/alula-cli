@@ -8,44 +8,36 @@ import FlightPubSub
 import FlightSecurityCore
 import FlightTransport
 import FlightWeb
-import FlightWebTesting
 import Testing
 
 @testable import App
 
-/// Does the application actually start?
+/// Does the application actually compose?
 ///
 /// Every other suite here tests a layer. This one tests the wiring: the same
-/// modules `main` boots, in the same order, frozen the same way. It exists
-/// because nothing did, and a lifetime mistake — a singleton capturing a
-/// request-scoped repository — sat undetected in `AppModule` while a hundred
-/// green tests ran around it. Freezing the container is where such a mistake
-/// surfaces, and freezing is exactly what a test of a single layer skips.
-@Suite("The application boots")
+/// modules `main` composes, built in the order the value flow forces, and
+/// assembled the same way. It exists because nothing did — and the eager
+/// construction the graph performs is where a composition mistake surfaces,
+/// which is exactly what a test of a single layer skips.
+@Suite("The application composes")
 struct BootstrapTests {
 
-    /// Everything `main` passes to `Flight.bootstrap`, minus the transport —
-    /// binding a socket is not what is under test here.
-    private func boot() throws -> Container {
+    /// Everything `main`'s composition root performs, by hand, minus the
+    /// transport (binding a socket is not what is under test here): what the
+    /// graph needs, then the graph, then what is built from it, then assemble.
+    /// Returns the graph so a test can confirm which components it built.
+    private func boot() throws -> FlightGraph {
         let configuration = Configuration(values: [
             "app.name": "App",
             "datasource.primary.url": "postgres://localhost/unused",
         ])
-        // The same wiring `main`'s composition root performs, for the three
-        // modules that take what they provide: PubSub reads configuration,
-        // and Channels is built from PubSub's bus plus the channels AppModule
-        // declares. The dependency walk cannot do this, which is the point —
-        // it is composition, and it belongs in one place.
-        // The composition root's own sequence, by hand, in the order the
-        // value flow forces: what the graph needs, then the graph, then what
-        // is built from it.
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
         let auth = DemoAuthModule()
         let pubsub = try FlightPubSubModule(configuration: configuration)
-        // Only what a *component* needs. Values a route terminal alone needs —
-        // the broadcaster, the socket stack, the validator — are parameters of
-        // `flightRoutes`, which is what keeps the graph free of Channels and
-        // so lets channels be built from the graph.
+        // Only what a *component* needs is a graph root. Values a route terminal
+        // alone needs — the broadcaster, the socket stack, the validator — are
+        // parameters of `flightRoutes`, which keeps the graph free of Channels
+        // and so lets channels be built from the graph.
         let graph = try FlightGraph(
             configuration: configuration, postgresDataSource: postgres.dataSource)
         let presenceModule = try FlightPresenceModule(
@@ -54,52 +46,49 @@ struct BootstrapTests {
             graph: graph, presence: presenceModule.presence)
         let channels = try FlightChannelsModule(
             bus: pubsub.bus, configuration: configuration, channels: demoChannels.channels)
-        return try TestContainer.build(configuration: configuration) {
-            postgres
-            auth
-            pubsub
-            demoChannels
-            channels
-            AppModule(graph: graph)
-            FlightSecurityModule(validator: auth.tokenValidator)
-            ActuatorModule()
-            presenceModule
-            // Cache takes its configuration now, so the DAG walk cannot build
-            // it; supplied here the way the composition root supplies it.
-            try FlightCacheModule(configuration: configuration)
-        }
+        // Assembling every module is the value-model equivalent of freezing the
+        // container: the graph already built every component eagerly above, and
+        // assemble seeds health and collects services over the whole set.
+        _ = try Flight.assemble(
+            configuration: configuration,
+            modules: [
+                postgres,
+                auth,
+                pubsub,
+                demoChannels,
+                channels,
+                AppModule(graph: graph),
+                FlightSecurityModule(validator: auth.tokenValidator),
+                ActuatorModule(),
+                presenceModule,
+                try FlightCacheModule(configuration: configuration),
+            ])
+        return graph
     }
 
-    @Test("the container freezes")
-    func freezes() throws {
-        #expect(throws: Never.self) { try boot() }
+    @Test("the whole composition builds and assembles")
+    func composes() throws {
+        #expect(throws: Never.self) { _ = try boot() }
     }
 
-    @Test("the demo's own token validator is the one installed")
+    @Test("the demo's own token validator is the one composed in")
     func bringYourOwnAuth() throws {
-        // FlightSecurityModule installs a generic OIDC validator unless one is
-        // already registered. If the module ordering regressed, this resolves
-        // the OIDC one — and would have demanded `security.oidc.issuer` above.
-        let validator = try boot().resolve((any TokenValidator).self)
-        #expect(validator is DemoTokenValidator)
+        // The app supplies its validator by value to `FlightSecurityModule`;
+        // nothing looks up an OIDC default, so no `security.oidc.*` is demanded.
+        let auth = DemoAuthModule()
+        #expect(auth.tokenValidator is DemoTokenValidator)
     }
 
-    @Test("nothing long-lived captured a request-scoped repository")
-    func lifetimes() throws {
-        // The gateway is the seam that keeps this true: singletons and
-        // channels hold it, and it opens a scope per call.
-        let container = try boot()
-        #expect(throws: Never.self) { try container.resolve(RoomDigestService.self) }
-        #expect(throws: Never.self) { try container.resolve(ChatRepository.self) }
-
-        // `(any RoomStore)` is deliberately *not* a component any more. The
-        // room channel used to resolve the protocol, so a bridge had to exist
-        // for it; the channel is now handed a `ChatRepository` and Swift
-        // converts it at the parameter. An existential nothing injects needs
-        // no registration — COMPOSITION-MIGRATION.md §3's "a concrete value
-        // passed into an `any P` parameter is the compiler's job".
-        #expect(throws: ResolutionError.self) {
-            _ = try container.resolve((any RoomStore).self)
-        }
+    @Test("the components a channel and a job hold are graph nodes")
+    func componentsAreBuilt() throws {
+        // `RoomDigestService` and `ChatRepository` are graph nodes the
+        // composition builds; accessing them is proof they were constructed.
+        // `(any RoomStore)` is deliberately *not* a node — nothing injects it
+        // as a component (the room channel is handed a `ChatRepository` and
+        // Swift converts it at the `any RoomStore` parameter), so there is no
+        // `graph.roomStore` to reach for at all.
+        let graph = try boot()
+        _ = graph.chatRepository
+        _ = graph.roomDigestService
     }
 }

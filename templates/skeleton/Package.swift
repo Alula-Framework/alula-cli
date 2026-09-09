@@ -19,7 +19,7 @@ let package = Package(
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // container and lifecycle.
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.14.0", traits: ["Web"])
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.16.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
@@ -33,7 +33,7 @@ let package = Package(
                 .product(name: "FlightActuator", package: "flight"),
             ],
             // Scans this target for @Component/@Controller/@Service and
-            // generates `flightRegisterAll` at build time. It also checks
+            // generates the composition root (`flightComposeModules`) at build time. It also checks
             // every @ConfigValue key without a default against flight.yaml,
             // so a missing key is a compile error rather than a 3am page.
             plugins: [

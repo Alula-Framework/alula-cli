@@ -26,8 +26,8 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.14.0", traits: ["Web"]),
-        .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.5.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.16.0", traits: ["Web"]),
+        .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.6.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -191,43 +191,16 @@ import FlightWeb
 
 /// Your application's module: one place that says what this app is made of.
 ///
-/// `flightRegisterAll` is generated at build time from everything the
-/// registration plugin found in this target — every `@Controller`,
-/// `@Service`, `@Repository`, and `@Component`. Adding a controller does not
-/// mean editing this file.
+/// It declares the subsystems this app is built on. Everything else — every
+/// `@Controller`, `@Service`, `@Repository`, and `@Component` the registration
+/// plugin scans, including the binding from `(any UserRepositoryProtocol)` to
+/// its one conformer — is wired by the generated composition root, so adding a
+/// controller does not mean editing this file.
 struct AppModule: FlightModule {
-    /// Modules that must be configured before this one. The list is a DAG
-    /// resolved once at bootstrap, so ordering is checked rather than hoped
-    /// for.
+    /// Modules that must be built before this one. The list is a DAG resolved
+    /// once at bootstrap, so ordering is checked rather than hoped for.
     static var dependencies: [any FlightModule.Type] {
         [PostgresDataModule<PrimaryDataSource>.self]
-    }
-
-
-    /// Every component, already built by the composition root. It used to be
-    /// constructed from the container at `freeze()`; the graph's roots are
-    /// things modules provide, so the place that assembles the modules is the
-    /// place that can build it.
-    let graph: FlightGraph
-
-    /// This module takes the graph, so it cannot be built from its type.
-    static var isTypeConstructible: Bool { false }
-
-    init(graph: FlightGraph) { self.graph = graph }
-
-    init() {
-        preconditionFailure(
-            "AppModule takes the component graph in init(graph:), so it cannot be instantiated "
-                + "from its type. `composedBy: flightComposeModules` builds the graph and passes "
-                + "it — Main.swift already does that.")
-    }
-
-    func configure(_ container: Container) throws {
-        // Everything the plugin scanned — including the binding from
-        // `(any UserRepositoryProtocol)` to `UserRepository`. A controller
-        // that injects a protocol with exactly one conformer in this target
-        // gets that bridge synthesized, so the seam costs no wiring here.
-        try flightRegisterAll(container, graph: graph)
     }
 }
 
@@ -417,13 +390,9 @@ struct HealthControllerTests {
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
         let graph = try FlightGraph(
             configuration: configuration, postgresDataSource: postgres.dataSource)
-        let container = try TestContainer.build(configuration: configuration) {
-            postgres
-            AppModule(graph: graph)
-        }
         // Routes are values the composition root hands to `FlightWebModule`,
-        // so a client that serves them is handed the same list.
-        let client = try TestClient(container: container, routes: flightRoutes(graph))
+        // so a client that serves them is built from the same graph.
+        let client = try TestClient(routes: flightRoutes(graph))
 
         let response = await client.get("/")
 
@@ -499,11 +468,17 @@ import Testing
 struct UserControllerTests {
 
     private func client(_ users: InMemoryUsers = InMemoryUsers([ada])) throws -> TestClient {
-        let container = try TestContainer.build {
-            Components(UserController.self)
-            Fake(users)
+        // The controller under test, built with the fake repository the way a
+        // route factory constructs it per request — no container, and the fake
+        // is a plain value passed in.
+        let make: @Sendable (RequestContext) throws -> UserController = { _ in
+            UserController(users: users)
         }
-        return try TestClient(container: container)
+        return try TestClient(routes: [
+            UserController._flightRoute_list_0(make),
+            UserController._flightRoute_get_1(make),
+            UserController._flightRoute_create_2(make),
+        ])
     }
 
     @Test("listing returns the rows the repository holds")
@@ -561,18 +536,6 @@ struct UserControllerTests {
 
         #expect(response.status == .conflict)
         #expect(users.stored.count == 1)
-    }
-}
-
-/// Registers the fake under the protocol the controller depends on.
-private struct Fake: FlightModule {
-    let users: InMemoryUsers
-    init() { self.users = InMemoryUsers() }
-    init(_ users: InMemoryUsers) { self.users = users }
-
-    func configure(_ container: Container) throws {
-        let users = self.users
-        container.register((any UserRepositoryProtocol).self, scope: .singleton) { _ in users }
     }
 }
 
@@ -639,8 +602,8 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.14.0", traits: ["Security"]),
-        .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.5.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.16.0", traits: ["Security"]),
+        .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.6.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -1735,12 +1698,10 @@ extension Principal: @retroactive ChannelPrincipal {}
 /// validated is a deployment decision, and a real one deletes this and lists
 /// `FlightOIDCModule` instead, configured through `security.oidc.*`.
 struct DemoAuthModule: FlightModule {
+    /// Provided as a value; the composer matches it to `FlightSecurityModule`'s
+    /// `validator:` by type. It used to be a container registration the
+    /// security module looked up.
     let tokenValidator: any TokenValidator = DemoTokenValidator()
-
-    func configure(_ container: Container) throws {
-        let validator = tokenValidator
-        container.register((any TokenValidator).self, scope: .singleton) { _ in validator }
-    }
 }
 
 struct AppModule: FlightModule {
@@ -1767,55 +1728,38 @@ struct AppModule: FlightModule {
     /// place that can build it.
     let graph: FlightGraph
 
-    /// This module takes the graph, so it cannot be built from its type.
-    static var isTypeConstructible: Bool { false }
-
     /// Makes `.once` mean once across every server rather than once per
     /// server. This demo runs one process, where the coordinator changes
     /// nothing — but providing it is the whole difference between a nightly
     /// job that is safe to scale and one that is not, and the scheduler warns
     /// at startup when it is missing.
     ///
-    /// A value the composition root hands to `FlightSchedulerModule`. It used
-    /// to be a container registration the scheduler looked up, which meant a
-    /// deployment that forgot it degraded silently.
+    /// A value the composition root hands to `FlightSchedulerModule` (matched
+    /// by type). It used to be a container registration the scheduler looked
+    /// up, which meant a deployment that forgot it degraded silently.
     let jobCoordinator: any JobCoordinator
+
+    /// What a pool exhaustion, an invalid changeset or a bad dynamic filter
+    /// look like on the wire, handed to `FlightWebModule` (matched by type).
+    /// See Web/ErrorMapping.swift for why this cannot be a middleware.
+    let errorMapper: ErrorMapper
+
+    /// The application's default-lane middleware, outermost first — the value
+    /// form of `container.pipeline { }`. RequestLogging sees the true
+    /// wall-clock time of everything below it. Handed to `FlightWebModule`,
+    /// which the composer aggregates middleware into.
+    let middleware: [MiddlewareRegistration]
 
     init(graph: FlightGraph) {
         self.graph = graph
         self.jobCoordinator = PostgresJobCoordinator(dataSource: graph.postgresDataSource)
+        self.errorMapper = AppErrorMapping.mapper()
+        self.middleware = MiddlewareRegistration.lane(.default, [RequestLogging()])
     }
 
-    init() {
-        preconditionFailure(
-            "AppModule takes the component graph in init(graph:), so it cannot be instantiated "
-                + "from its type. `composedBy: flightComposeModules` builds the graph and passes "
-                + "it — Main.swift already does that.")
-    }
-
-    func configure(_ container: Container) throws {
-        try flightRegisterAll(container, graph: graph)
-
-        // Order is declared once, here, top to bottom, outermost first —
-        // RequestLogging sees the true wall-clock time of everything below
-        // it.
-        container.pipeline {
-            RequestLogging.self
-        }
-
-        // What a pool exhaustion, an invalid changeset or a bad dynamic
-        // filter look like on the wire. See Web/ErrorMapping.swift for why
-        // this cannot be done with a middleware.
-        container.register(ErrorMapper.self, scope: .singleton) { _ in
-            AppErrorMapping.mapper()
-        }
-
-
-        // The socket route itself is `SocketController`, declared with
-        // `@WebSocketRoute` rather than registered here — see that file for
-        // why a declared route beats a hand-registered one.
-    }
-
+    // The socket route itself is `SocketController`, declared with
+    // `@WebSocketRoute`; the app's controllers become routes through the
+    // generated `flightRoutes(graph)`, not a registration here.
 }
 
 @main
@@ -1869,8 +1813,6 @@ struct DemoChannelsModule: FlightModule {
     /// would make this module *provide* `any Presence` alongside
     /// `FlightPresenceModule`, and the build refuses that ambiguity by name.
     /// What this module provides is `channels`.
-    static var isTypeConstructible: Bool { false }
-
     init(graph: FlightGraph, presence: any Presence) {
         let chat = graph.chatRepository
         let digests = graph.roomDigestService
@@ -1900,8 +1842,6 @@ struct DemoChannelsModule: FlightModule {
     /// The composer collects `channels` from every module that declares any
     /// and hands them to `FlightChannelsModule`.
     let channels: [ChannelRegistration]
-
-    func configure(_ container: Container) throws {}
 }
 
 """#,
@@ -2617,11 +2557,10 @@ import Foundation
 ///
 /// `@Inject` targets the existential `(any UserRepositoryProtocol)`
 /// rather than the concrete `UserRepository` — the seam that makes this type
-/// unit-testable. Nothing bridges that key by hand anymore: the registration
-/// generator matches this demand against `UserRepository`'s conformance (its
-/// only scanned conformer) and synthesizes the bridge into
-/// `flightRegisterAll`. Tests bypass `flightRegisterAll` and register a fake
-/// under the same key — see `UserServiceTests.swift` /
+/// unit-testable. Nothing bridges that key by hand: the composition root
+/// matches this demand against `UserRepository`'s conformance (its only
+/// scanned conformer) and builds the service from it. Tests construct the
+/// service directly with a fake repository — see `UserServiceTests.swift` /
 /// `UserControllerTests.swift` for the two ends of the seam.
 @Service
 struct UserService {
@@ -2922,10 +2861,9 @@ struct AttachmentControllerTests {
 
     @Test("a file and its form fields arrive, sizes intact")
     func uploadRoundTrip() async throws {
-        let container = try TestContainer.build {
-            Components(AttachmentController.self)
-        }
-        let client = try TestClient(container: container)
+        let client = try TestClient(routes: [
+            AttachmentController._flightRoute_upload_0 { _ in AttachmentController() }
+        ])
 
         let boundary = "----DemoBoundary"
         let filePayload = String(repeating: "b", count: 50_000)
@@ -2960,10 +2898,9 @@ struct AttachmentControllerTests {
 
     @Test("a body that is not multipart is refused as a 415")
     func nonMultipartRefused() async throws {
-        let container = try TestContainer.build {
-            Components(AttachmentController.self)
-        }
-        let client = try TestClient(container: container)
+        let client = try TestClient(routes: [
+            AttachmentController._flightRoute_upload_0 { _ in AttachmentController() }
+        ])
         let response = await client.post(
             "/attachments",
             headers: [.contentType: "application/json"],
@@ -2984,44 +2921,36 @@ import FlightPubSub
 import FlightSecurityCore
 import FlightTransport
 import FlightWeb
-import FlightWebTesting
 import Testing
 
 @testable import App
 
-/// Does the application actually start?
+/// Does the application actually compose?
 ///
 /// Every other suite here tests a layer. This one tests the wiring: the same
-/// modules `main` boots, in the same order, frozen the same way. It exists
-/// because nothing did, and a lifetime mistake — a singleton capturing a
-/// request-scoped repository — sat undetected in `AppModule` while a hundred
-/// green tests ran around it. Freezing the container is where such a mistake
-/// surfaces, and freezing is exactly what a test of a single layer skips.
-@Suite("The application boots")
+/// modules `main` composes, built in the order the value flow forces, and
+/// assembled the same way. It exists because nothing did — and the eager
+/// construction the graph performs is where a composition mistake surfaces,
+/// which is exactly what a test of a single layer skips.
+@Suite("The application composes")
 struct BootstrapTests {
 
-    /// Everything `main` passes to `Flight.bootstrap`, minus the transport —
-    /// binding a socket is not what is under test here.
-    private func boot() throws -> Container {
+    /// Everything `main`'s composition root performs, by hand, minus the
+    /// transport (binding a socket is not what is under test here): what the
+    /// graph needs, then the graph, then what is built from it, then assemble.
+    /// Returns the graph so a test can confirm which components it built.
+    private func boot() throws -> FlightGraph {
         let configuration = Configuration(values: [
             "app.name": "App",
             "datasource.primary.url": "postgres://localhost/unused",
         ])
-        // The same wiring `main`'s composition root performs, for the three
-        // modules that take what they provide: PubSub reads configuration,
-        // and Channels is built from PubSub's bus plus the channels AppModule
-        // declares. The dependency walk cannot do this, which is the point —
-        // it is composition, and it belongs in one place.
-        // The composition root's own sequence, by hand, in the order the
-        // value flow forces: what the graph needs, then the graph, then what
-        // is built from it.
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
         let auth = DemoAuthModule()
         let pubsub = try FlightPubSubModule(configuration: configuration)
-        // Only what a *component* needs. Values a route terminal alone needs —
-        // the broadcaster, the socket stack, the validator — are parameters of
-        // `flightRoutes`, which is what keeps the graph free of Channels and
-        // so lets channels be built from the graph.
+        // Only what a *component* needs is a graph root. Values a route terminal
+        // alone needs — the broadcaster, the socket stack, the validator — are
+        // parameters of `flightRoutes`, which keeps the graph free of Channels
+        // and so lets channels be built from the graph.
         let graph = try FlightGraph(
             configuration: configuration, postgresDataSource: postgres.dataSource)
         let presenceModule = try FlightPresenceModule(
@@ -3030,53 +2959,50 @@ struct BootstrapTests {
             graph: graph, presence: presenceModule.presence)
         let channels = try FlightChannelsModule(
             bus: pubsub.bus, configuration: configuration, channels: demoChannels.channels)
-        return try TestContainer.build(configuration: configuration) {
-            postgres
-            auth
-            pubsub
-            demoChannels
-            channels
-            AppModule(graph: graph)
-            FlightSecurityModule(validator: auth.tokenValidator)
-            ActuatorModule()
-            presenceModule
-            // Cache takes its configuration now, so the DAG walk cannot build
-            // it; supplied here the way the composition root supplies it.
-            try FlightCacheModule(configuration: configuration)
-        }
+        // Assembling every module is the value-model equivalent of freezing the
+        // container: the graph already built every component eagerly above, and
+        // assemble seeds health and collects services over the whole set.
+        _ = try Flight.assemble(
+            configuration: configuration,
+            modules: [
+                postgres,
+                auth,
+                pubsub,
+                demoChannels,
+                channels,
+                AppModule(graph: graph),
+                FlightSecurityModule(validator: auth.tokenValidator),
+                ActuatorModule(),
+                presenceModule,
+                try FlightCacheModule(configuration: configuration),
+            ])
+        return graph
     }
 
-    @Test("the container freezes")
-    func freezes() throws {
-        #expect(throws: Never.self) { try boot() }
+    @Test("the whole composition builds and assembles")
+    func composes() throws {
+        #expect(throws: Never.self) { _ = try boot() }
     }
 
-    @Test("the demo's own token validator is the one installed")
+    @Test("the demo's own token validator is the one composed in")
     func bringYourOwnAuth() throws {
-        // FlightSecurityModule installs a generic OIDC validator unless one is
-        // already registered. If the module ordering regressed, this resolves
-        // the OIDC one — and would have demanded `security.oidc.issuer` above.
-        let validator = try boot().resolve((any TokenValidator).self)
-        #expect(validator is DemoTokenValidator)
+        // The app supplies its validator by value to `FlightSecurityModule`;
+        // nothing looks up an OIDC default, so no `security.oidc.*` is demanded.
+        let auth = DemoAuthModule()
+        #expect(auth.tokenValidator is DemoTokenValidator)
     }
 
-    @Test("nothing long-lived captured a request-scoped repository")
-    func lifetimes() throws {
-        // The gateway is the seam that keeps this true: singletons and
-        // channels hold it, and it opens a scope per call.
-        let container = try boot()
-        #expect(throws: Never.self) { try container.resolve(RoomDigestService.self) }
-        #expect(throws: Never.self) { try container.resolve(ChatRepository.self) }
-
-        // `(any RoomStore)` is deliberately *not* a component any more. The
-        // room channel used to resolve the protocol, so a bridge had to exist
-        // for it; the channel is now handed a `ChatRepository` and Swift
-        // converts it at the parameter. An existential nothing injects needs
-        // no registration — COMPOSITION-MIGRATION.md §3's "a concrete value
-        // passed into an `any P` parameter is the compiler's job".
-        #expect(throws: ResolutionError.self) {
-            _ = try container.resolve((any RoomStore).self)
-        }
+    @Test("the components a channel and a job hold are graph nodes")
+    func componentsAreBuilt() throws {
+        // `RoomDigestService` and `ChatRepository` are graph nodes the
+        // composition builds; accessing them is proof they were constructed.
+        // `(any RoomStore)` is deliberately *not* a node — nothing injects it
+        // as a component (the room channel is handed a `ChatRepository` and
+        // Swift converts it at the `any RoomStore` parameter), so there is no
+        // `graph.roomStore` to reach for at all.
+        let graph = try boot()
+        _ = graph.chatRepository
+        _ = graph.roomDigestService
     }
 }
 
@@ -3107,35 +3033,15 @@ struct ChatJobsTests {
         func headlines() async throws -> [RoomHeadline] { [] }
     }
 
-    /// Binds the stub under the same key the application binds the real
-    /// service under.
-    private struct FakeDigests: FlightModule {
-        let rooms: [RoomActivity]
-        // FlightModule requires a no-argument init — bootstrap instantiates
-        // modules itself — so the seeded one is a second initializer, the
-        // same shape FakeRepository uses.
-        init() { self.rooms = [] }
-        init(rooms: [RoomActivity]) { self.rooms = rooms }
-
-        func configure(_ container: Container) throws {
-            let rooms = self.rooms
-            container.register((any DigestReading).self, scope: .singleton) { _ in
-                StubDigests(rooms: rooms)
-            }
-        }
-    }
-
-    private func jobs(rooms: [RoomActivity]) throws -> ChatJobs {
-        let container = try TestContainer.build {
-            Components(ChatJobs.self)
-            FakeDigests(rooms: rooms)
-        }
-        return try container.resolve(ChatJobs.self)
+    private func jobs(rooms: [RoomActivity]) -> ChatJobs {
+        // The scheduler is an ordinary component: built directly with the
+        // digest reads stubbed, the way the composer builds it from the graph.
+        ChatJobs(digests: StubDigests(rooms: rooms))
     }
 
     @Test("the nightly summary runs against the busy rooms")
     func summaryCountsBusyRooms() async throws {
-        let jobs = try jobs(rooms: [
+        let jobs = jobs(rooms: [
             RoomActivity(room: "general", messages: 42, lastSentAt: Date()),
             RoomActivity(room: "quiet", messages: 1, lastSentAt: nil),
         ])
@@ -3235,23 +3141,12 @@ import Testing
 /// This is the suite that proves the thing the demo previously only claimed —
 /// that a chat app built on Flight actually delivers messages and presence to
 /// the people in the room.
-private struct RealtimeModule: FlightModule {
-    static var dependencies: [any FlightModule.Type] {
-        [FlightChannelsModule.self, FlightPresenceModule.self]
-    }
-
+/// Holds the demo's room channel, built from a fake store and the shared
+/// presence — the same shape `AppModule`/`DemoChannelsModule` use, a value
+/// the channels module is built *from*.
+private struct RealtimeModule {
     let store: FakeRoomStore
-
-    /// The same shape `AppModule` uses: the channel is a value this module
-    /// holds, so Channels is built *from* it rather than collecting it.
     let channels: [ChannelRegistration]
-
-    /// `FlightModule` requires a no-argument init because bootstrap
-    /// instantiates modules itself. `TestContainer.build` takes ready-made
-    /// *instances* though, so the real initializer below is the one the suite
-    /// uses — and each test gets its own store, which matters because
-    /// swift-testing runs tests in parallel.
-    init() { preconditionFailure("RealtimeModule takes a store and presence.") }
 
     init(store: FakeRoomStore, presence: any Presence) {
         self.store = store
@@ -3266,26 +3161,13 @@ private struct RealtimeModule: FlightModule {
             }
         ]
     }
-
-    static var isTypeConstructible: Bool { false }
-
-    func configure(_ container: Container) throws {
-        let store = self.store
-        container.register((any RoomStore).self, scope: .singleton) { _ in store }
-        container.register((any TokenValidator).self, scope: .singleton) { _ in
-            DemoTokenValidator()
-        }
-        // The real route, not a stand-in: `SocketController` is what the
-        // application ships, so registering it here is what makes these
-        // tests exercise the upgrade path users actually get.
-        try SocketController._flightRegister(container)
-    }
 }
 
 private struct Harness {
-    let container: Container
     let testClient: TestClient
     let store: FakeRoomStore
+    /// The presence engine the room channel tracks into and the tests read.
+    let presence: any Presence
 
     init(store: FakeRoomStore) throws {
         self.store = store
@@ -3293,22 +3175,25 @@ private struct Harness {
             "flight.channels.heartbeat-check-interval-seconds": "0.05"
         ])
         // The wiring, written out: PubSub's bus and this module's declared
-        // channels are what Channels is built from. Both take what they
-        // provide, so neither can be instantiated from its type.
+        // channels are what Channels is built from.
         let pubsub = try FlightPubSubModule(configuration: configuration)
-        // No adapter: a single-node test. That is stated rather than
-        // discovered by Presence probing the container for one.
-        let presence = try FlightPresenceModule(
+        // No adapter: a single-node test, stated rather than discovered.
+        let presenceModule = try FlightPresenceModule(
             configuration: configuration, localBus: pubsub.local, gossipBus: pubsub.bus)
-        let realtime = RealtimeModule(store: store, presence: presence.presence)
-        self.container = try TestContainer.build(configuration: configuration) {
-            pubsub
-            presence
-            realtime
-            try FlightChannelsModule(
-                bus: pubsub.bus, configuration: configuration, channels: realtime.channels)
+        let presence = presenceModule.presence
+        let realtime = RealtimeModule(store: store, presence: presence)
+        let channels = try FlightChannelsModule(
+            bus: pubsub.bus, configuration: configuration, channels: realtime.channels)
+        // The real route the application ships (`SocketController`), built the
+        // way `flightRoutes` builds it: the validator by value, the channels
+        // stack from the channels module. This is what exercises the upgrade
+        // path users actually get.
+        let sockets = channels.sockets
+        let socketRoute = SocketController._flightRoute_socket_0 { _ in
+            SocketController(validator: DemoTokenValidator(), sockets: sockets)
         }
-        self.testClient = try TestClient(container: container)
+        self.testClient = try TestClient(routes: [socketRoute])
+        self.presence = presence
     }
 
     /// A client authenticated as `subject`. The token rides in the query
@@ -3470,7 +3355,7 @@ struct RealtimeTests {
     @Test("presence lists everyone in the room, and drops them when they go")
     func presenceTracksMembership() async throws {
         let harness = try Harness(store: FakeRoomStore(rooms: [.fixture(slug: "general")]))
-        let presence = try harness.container.resolve((any Presence).self)
+        let presence = harness.presence
 
         let ada = harness.client(as: "ada")
         try await ada.connect()
@@ -3497,7 +3382,7 @@ struct RealtimeTests {
     @Test("one identity in two tabs is one key with two metas")
     func oneIdentityManyConnections() async throws {
         let harness = try Harness(store: FakeRoomStore(rooms: [.fixture(slug: "general")]))
-        let presence = try harness.container.resolve((any Presence).self)
+        let presence = harness.presence
 
         let tabOne = harness.client(as: "ada")
         try await tabOne.connect()
@@ -3777,18 +3662,6 @@ final class MockUserRepository: UserRepositoryProtocol, Sendable {
     }
 }
 
-/// Binds the fake under the same key the application binds the real
-/// repository under.
-struct FakeRepository: FlightModule {
-    let repository: MockUserRepository
-    init() { self.repository = MockUserRepository(users: []) }
-    init(_ repository: MockUserRepository) { self.repository = repository }
-
-    func configure(_ container: Container) throws {
-        let repository = self.repository
-        container.register((any UserRepositoryProtocol).self, scope: .singleton) { _ in repository }
-    }
-}
 
 """#,
             "Tests/AppTests/UserControllerTests.swift": #"""
@@ -3810,13 +3683,22 @@ let ada = User(
 
 @Suite("UserController — repository mocked, everything above it real")
 struct UserControllerTests {
+    /// The controller's routes, built the way a route factory does per request:
+    /// the mock repository feeds a real `UserService`, which feeds the controller.
+    private func userClient(_ repository: MockUserRepository) throws -> TestClient {
+        let make: @Sendable (RequestContext) throws -> UserController = { _ in
+            UserController(users: UserService(repository: repository))
+        }
+        return try TestClient(routes: [
+            UserController._flightRoute_listUsers_0(make),
+            UserController._flightRoute_getUser_1(make),
+            UserController._flightRoute_upsertUser_2(make),
+            UserController._flightRoute_createUser_3(make),
+        ])
+    }
     @Test("GET /user/:id returns the mocked user as JSON")
     func getUserReturnsMockedUser() async throws {
-        let container = try TestContainer.build {
-            Components(UserController.self, UserService.self)
-            FakeRepository(MockUserRepository(users: [ada]))
-        }
-        let client = try TestClient(container: container)
+        let client = try userClient(MockUserRepository(users: [ada]))
 
         let response = await client.get("/user/\(ada.id)")
 
@@ -3836,11 +3718,7 @@ struct UserControllerTests {
 
     @Test("GET /user/:id 404s when the mocked repository has no match")
     func getUserReturnsNotFoundWhenMissing() async throws {
-        let container = try TestContainer.build {
-            Components(UserController.self, UserService.self)
-            FakeRepository(MockUserRepository(users: [ada]))
-        }
-        let client = try TestClient(container: container)
+        let client = try userClient(MockUserRepository(users: [ada]))
 
         let response = await client.get("/user/\(UUID())")
 
@@ -3872,11 +3750,10 @@ import Testing
 /// rather than bypassed. Only the repository is replaced.
 @Suite("UserService — repository mocked")
 struct UserServiceTests {
-    private func makeContainer(repository: MockUserRepository) throws -> Container {
-        try TestContainer.build {
-            Components(UserService.self)
-            FakeRepository(repository)
-        }
+    private func makeService(repository: MockUserRepository) -> UserService {
+        // The service under test, built with the fake the way the composer
+        // builds it from the graph — the repository is injected by value.
+        UserService(repository: repository)
     }
 
     @Test("find(byID:) returns the matching user from the mocked repository")
@@ -3884,18 +3761,16 @@ struct UserServiceTests {
         let ada = User(
             id: UUID(), name: "Ada", email: "ada@example.com",
             createdAt: Date(), updatedAt: Date())
-        let container = try makeContainer(repository: MockUserRepository(users: [ada]))
-
-        let found = try await container.resolve(UserService.self).find(byID: ada.id)
+        let found = try await makeService(
+            repository: MockUserRepository(users: [ada])).find(byID: ada.id)
 
         #expect(found == ada)
     }
 
     @Test("find(byID:) returns nil when the mocked repository has no match")
     func findByIDReturnsNilWhenMissing() async throws {
-        let container = try makeContainer(repository: MockUserRepository())
-
-        let found = try await container.resolve(UserService.self).find(byID: UUID())
+        let found = try await makeService(
+            repository: MockUserRepository()).find(byID: UUID())
 
         #expect(found == nil)
     }
@@ -3973,7 +3848,7 @@ let package = Package(
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // container and lifecycle.
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.14.0", traits: ["Web"])
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.16.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
@@ -3987,7 +3862,7 @@ let package = Package(
                 .product(name: "FlightActuator", package: "flight"),
             ],
             // Scans this target for @Component/@Controller/@Service and
-            // generates `flightRegisterAll` at build time. It also checks
+            // generates the composition root (`flightComposeModules`) at build time. It also checks
             // every @ConfigValue key without a default against flight.yaml,
             // so a missing key is a compile error rather than a 3am page.
             plugins: [
@@ -4041,38 +3916,14 @@ import FlightWeb
 
 /// Your application's module: one place that says what this app is made of.
 ///
-/// `flightRegisterAll` is generated at build time from everything the
-/// registration plugin found in this target — every `@Controller`,
-/// `@Service`, `@Repository`, and `@Component`. Adding a controller does not
-/// mean editing this file.
+/// It declares the subsystems this app is built on. Everything else — every
+/// `@Controller`, `@Service`, `@Repository`, and `@Component` the registration
+/// plugin scans — is wired by the generated composition root, so adding a
+/// controller does not mean editing this file.
 struct AppModule: FlightModule {
-    /// Modules that must be configured before this one. The list is a DAG
-    /// resolved once at bootstrap, so ordering is checked rather than hoped
-    /// for.
+    /// Modules that must be built before this one. The list is a DAG resolved
+    /// once at bootstrap, so ordering is checked rather than hoped for.
     static var dependencies: [any FlightModule.Type] { [] }
-
-
-    /// Every component, already built by the composition root. It used to be
-    /// constructed from the container at `freeze()`; the graph's roots are
-    /// things modules provide, so the place that assembles the modules is the
-    /// place that can build it.
-    let graph: FlightGraph
-
-    /// This module takes the graph, so it cannot be built from its type.
-    static var isTypeConstructible: Bool { false }
-
-    init(graph: FlightGraph) { self.graph = graph }
-
-    init() {
-        preconditionFailure(
-            "AppModule takes the component graph in init(graph:), so it cannot be instantiated "
-                + "from its type. `composedBy: flightComposeModules` builds the graph and passes "
-                + "it — Main.swift already does that.")
-    }
-
-    func configure(_ container: Container) throws {
-        try flightRegisterAll(container, graph: graph)
-    }
 }
 
 @main
@@ -4128,16 +3979,11 @@ struct HealthControllerTests {
 
     @Test("the index route answers with the configured application name")
     func index() async throws {
-        // The composition root's sequence, by hand: the graph is built first,
-        // and AppModule registers from it.
+        // The composition root's sequence, by hand: build the graph, then the
+        // routes from it — the values `FlightWebModule` is composed with.
         let configuration = Configuration(values: ["app.name": "TestApp"])
         let graph = try FlightGraph(configuration: configuration)
-        let container = try TestContainer.build(configuration: configuration) {
-            AppModule(graph: graph)
-        }
-        // Routes are values the composition root hands to `FlightWebModule`,
-        // so a client that serves them is handed the same list.
-        let client = try TestClient(container: container, routes: flightRoutes(graph))
+        let client = try TestClient(routes: flightRoutes(graph))
 
         let response = await client.get("/")
 

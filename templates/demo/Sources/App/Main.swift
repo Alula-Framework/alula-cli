@@ -32,12 +32,10 @@ extension Principal: @retroactive ChannelPrincipal {}
 /// validated is a deployment decision, and a real one deletes this and lists
 /// `FlightOIDCModule` instead, configured through `security.oidc.*`.
 struct DemoAuthModule: FlightModule {
+    /// Provided as a value; the composer matches it to `FlightSecurityModule`'s
+    /// `validator:` by type. It used to be a container registration the
+    /// security module looked up.
     let tokenValidator: any TokenValidator = DemoTokenValidator()
-
-    func configure(_ container: Container) throws {
-        let validator = tokenValidator
-        container.register((any TokenValidator).self, scope: .singleton) { _ in validator }
-    }
 }
 
 struct AppModule: FlightModule {
@@ -64,55 +62,38 @@ struct AppModule: FlightModule {
     /// place that can build it.
     let graph: FlightGraph
 
-    /// This module takes the graph, so it cannot be built from its type.
-    static var isTypeConstructible: Bool { false }
-
     /// Makes `.once` mean once across every server rather than once per
     /// server. This demo runs one process, where the coordinator changes
     /// nothing — but providing it is the whole difference between a nightly
     /// job that is safe to scale and one that is not, and the scheduler warns
     /// at startup when it is missing.
     ///
-    /// A value the composition root hands to `FlightSchedulerModule`. It used
-    /// to be a container registration the scheduler looked up, which meant a
-    /// deployment that forgot it degraded silently.
+    /// A value the composition root hands to `FlightSchedulerModule` (matched
+    /// by type). It used to be a container registration the scheduler looked
+    /// up, which meant a deployment that forgot it degraded silently.
     let jobCoordinator: any JobCoordinator
+
+    /// What a pool exhaustion, an invalid changeset or a bad dynamic filter
+    /// look like on the wire, handed to `FlightWebModule` (matched by type).
+    /// See Web/ErrorMapping.swift for why this cannot be a middleware.
+    let errorMapper: ErrorMapper
+
+    /// The application's default-lane middleware, outermost first — the value
+    /// form of `container.pipeline { }`. RequestLogging sees the true
+    /// wall-clock time of everything below it. Handed to `FlightWebModule`,
+    /// which the composer aggregates middleware into.
+    let middleware: [MiddlewareRegistration]
 
     init(graph: FlightGraph) {
         self.graph = graph
         self.jobCoordinator = PostgresJobCoordinator(dataSource: graph.postgresDataSource)
+        self.errorMapper = AppErrorMapping.mapper()
+        self.middleware = MiddlewareRegistration.lane(.default, [RequestLogging()])
     }
 
-    init() {
-        preconditionFailure(
-            "AppModule takes the component graph in init(graph:), so it cannot be instantiated "
-                + "from its type. `composedBy: flightComposeModules` builds the graph and passes "
-                + "it — Main.swift already does that.")
-    }
-
-    func configure(_ container: Container) throws {
-        try flightRegisterAll(container, graph: graph)
-
-        // Order is declared once, here, top to bottom, outermost first —
-        // RequestLogging sees the true wall-clock time of everything below
-        // it.
-        container.pipeline {
-            RequestLogging.self
-        }
-
-        // What a pool exhaustion, an invalid changeset or a bad dynamic
-        // filter look like on the wire. See Web/ErrorMapping.swift for why
-        // this cannot be done with a middleware.
-        container.register(ErrorMapper.self, scope: .singleton) { _ in
-            AppErrorMapping.mapper()
-        }
-
-
-        // The socket route itself is `SocketController`, declared with
-        // `@WebSocketRoute` rather than registered here — see that file for
-        // why a declared route beats a hand-registered one.
-    }
-
+    // The socket route itself is `SocketController`, declared with
+    // `@WebSocketRoute`; the app's controllers become routes through the
+    // generated `flightRoutes(graph)`, not a registration here.
 }
 
 @main
@@ -166,8 +147,6 @@ struct DemoChannelsModule: FlightModule {
     /// would make this module *provide* `any Presence` alongside
     /// `FlightPresenceModule`, and the build refuses that ambiguity by name.
     /// What this module provides is `channels`.
-    static var isTypeConstructible: Bool { false }
-
     init(graph: FlightGraph, presence: any Presence) {
         let chat = graph.chatRepository
         let digests = graph.roomDigestService
@@ -197,6 +176,4 @@ struct DemoChannelsModule: FlightModule {
     /// The composer collects `channels` from every module that declares any
     /// and hands them to `FlightChannelsModule`.
     let channels: [ChannelRegistration]
-
-    func configure(_ container: Container) throws {}
 }

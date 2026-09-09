@@ -23,35 +23,15 @@ struct ChatJobsTests {
         func headlines() async throws -> [RoomHeadline] { [] }
     }
 
-    /// Binds the stub under the same key the application binds the real
-    /// service under.
-    private struct FakeDigests: FlightModule {
-        let rooms: [RoomActivity]
-        // FlightModule requires a no-argument init — bootstrap instantiates
-        // modules itself — so the seeded one is a second initializer, the
-        // same shape FakeRepository uses.
-        init() { self.rooms = [] }
-        init(rooms: [RoomActivity]) { self.rooms = rooms }
-
-        func configure(_ container: Container) throws {
-            let rooms = self.rooms
-            container.register((any DigestReading).self, scope: .singleton) { _ in
-                StubDigests(rooms: rooms)
-            }
-        }
-    }
-
-    private func jobs(rooms: [RoomActivity]) throws -> ChatJobs {
-        let container = try TestContainer.build {
-            Components(ChatJobs.self)
-            FakeDigests(rooms: rooms)
-        }
-        return try container.resolve(ChatJobs.self)
+    private func jobs(rooms: [RoomActivity]) -> ChatJobs {
+        // The scheduler is an ordinary component: built directly with the
+        // digest reads stubbed, the way the composer builds it from the graph.
+        ChatJobs(digests: StubDigests(rooms: rooms))
     }
 
     @Test("the nightly summary runs against the busy rooms")
     func summaryCountsBusyRooms() async throws {
-        let jobs = try jobs(rooms: [
+        let jobs = jobs(rooms: [
             RoomActivity(room: "general", messages: 42, lastSentAt: Date()),
             RoomActivity(room: "quiet", messages: 1, lastSentAt: nil),
         ])

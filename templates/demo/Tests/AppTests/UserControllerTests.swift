@@ -16,13 +16,22 @@ let ada = User(
 
 @Suite("UserController — repository mocked, everything above it real")
 struct UserControllerTests {
+    /// The controller's routes, built the way a route factory does per request:
+    /// the mock repository feeds a real `UserService`, which feeds the controller.
+    private func userClient(_ repository: MockUserRepository) throws -> TestClient {
+        let make: @Sendable (RequestContext) throws -> UserController = { _ in
+            UserController(users: UserService(repository: repository))
+        }
+        return try TestClient(routes: [
+            UserController._flightRoute_listUsers_0(make),
+            UserController._flightRoute_getUser_1(make),
+            UserController._flightRoute_upsertUser_2(make),
+            UserController._flightRoute_createUser_3(make),
+        ])
+    }
     @Test("GET /user/:id returns the mocked user as JSON")
     func getUserReturnsMockedUser() async throws {
-        let container = try TestContainer.build {
-            Components(UserController.self, UserService.self)
-            FakeRepository(MockUserRepository(users: [ada]))
-        }
-        let client = try TestClient(container: container)
+        let client = try userClient(MockUserRepository(users: [ada]))
 
         let response = await client.get("/user/\(ada.id)")
 
@@ -42,11 +51,7 @@ struct UserControllerTests {
 
     @Test("GET /user/:id 404s when the mocked repository has no match")
     func getUserReturnsNotFoundWhenMissing() async throws {
-        let container = try TestContainer.build {
-            Components(UserController.self, UserService.self)
-            FakeRepository(MockUserRepository(users: [ada]))
-        }
-        let client = try TestClient(container: container)
+        let client = try userClient(MockUserRepository(users: [ada]))
 
         let response = await client.get("/user/\(UUID())")
 

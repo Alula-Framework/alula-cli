@@ -19,11 +19,17 @@ import Testing
 struct UserControllerTests {
 
     private func client(_ users: InMemoryUsers = InMemoryUsers([ada])) throws -> TestClient {
-        let container = try TestContainer.build {
-            Components(UserController.self)
-            Fake(users)
+        // The controller under test, built with the fake repository the way a
+        // route factory constructs it per request — no container, and the fake
+        // is a plain value passed in.
+        let make: @Sendable (RequestContext) throws -> UserController = { _ in
+            UserController(users: users)
         }
-        return try TestClient(container: container)
+        return try TestClient(routes: [
+            UserController._flightRoute_list_0(make),
+            UserController._flightRoute_get_1(make),
+            UserController._flightRoute_create_2(make),
+        ])
     }
 
     @Test("listing returns the rows the repository holds")
@@ -81,18 +87,6 @@ struct UserControllerTests {
 
         #expect(response.status == .conflict)
         #expect(users.stored.count == 1)
-    }
-}
-
-/// Registers the fake under the protocol the controller depends on.
-private struct Fake: FlightModule {
-    let users: InMemoryUsers
-    init() { self.users = InMemoryUsers() }
-    init(_ users: InMemoryUsers) { self.users = users }
-
-    func configure(_ container: Container) throws {
-        let users = self.users
-        container.register((any UserRepositoryProtocol).self, scope: .singleton) { _ in users }
     }
 }
 

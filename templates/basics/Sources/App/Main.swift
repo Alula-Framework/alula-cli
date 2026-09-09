@@ -6,43 +6,16 @@ import FlightWeb
 
 /// Your application's module: one place that says what this app is made of.
 ///
-/// `flightRegisterAll` is generated at build time from everything the
-/// registration plugin found in this target — every `@Controller`,
-/// `@Service`, `@Repository`, and `@Component`. Adding a controller does not
-/// mean editing this file.
+/// It declares the subsystems this app is built on. Everything else — every
+/// `@Controller`, `@Service`, `@Repository`, and `@Component` the registration
+/// plugin scans, including the binding from `(any UserRepositoryProtocol)` to
+/// its one conformer — is wired by the generated composition root, so adding a
+/// controller does not mean editing this file.
 struct AppModule: FlightModule {
-    /// Modules that must be configured before this one. The list is a DAG
-    /// resolved once at bootstrap, so ordering is checked rather than hoped
-    /// for.
+    /// Modules that must be built before this one. The list is a DAG resolved
+    /// once at bootstrap, so ordering is checked rather than hoped for.
     static var dependencies: [any FlightModule.Type] {
         [PostgresDataModule<PrimaryDataSource>.self]
-    }
-
-
-    /// Every component, already built by the composition root. It used to be
-    /// constructed from the container at `freeze()`; the graph's roots are
-    /// things modules provide, so the place that assembles the modules is the
-    /// place that can build it.
-    let graph: FlightGraph
-
-    /// This module takes the graph, so it cannot be built from its type.
-    static var isTypeConstructible: Bool { false }
-
-    init(graph: FlightGraph) { self.graph = graph }
-
-    init() {
-        preconditionFailure(
-            "AppModule takes the component graph in init(graph:), so it cannot be instantiated "
-                + "from its type. `composedBy: flightComposeModules` builds the graph and passes "
-                + "it — Main.swift already does that.")
-    }
-
-    func configure(_ container: Container) throws {
-        // Everything the plugin scanned — including the binding from
-        // `(any UserRepositoryProtocol)` to `UserRepository`. A controller
-        // that injects a protocol with exactly one conformer in this target
-        // gets that bridge synthesized, so the seam costs no wiring here.
-        try flightRegisterAll(container, graph: graph)
     }
 }
 
