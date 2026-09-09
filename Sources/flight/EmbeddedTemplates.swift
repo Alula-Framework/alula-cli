@@ -2976,6 +2976,7 @@ struct AttachmentControllerTests {
             "Tests/AppTests/BootstrapTests.swift": #"""
 import FlightActuator
 import FlightChannels
+import FlightCache
 import FlightCore
 import FlightDataPostgres
 import FlightPresence
@@ -3039,6 +3040,9 @@ struct BootstrapTests {
             FlightSecurityModule(validator: auth.tokenValidator)
             ActuatorModule()
             presenceModule
+            // Cache takes its configuration now, so the DAG walk cannot build
+            // it; supplied here the way the composition root supplies it.
+            try FlightCacheModule(configuration: configuration)
         }
     }
 
