@@ -18,10 +18,10 @@ struct AppModule: FlightModule {
 @main
 struct Main {
     static func main() async {
-        // Configuration loads first, then the container is built, the module
-        // DAG configures, the container freezes, and only then does the
-        // server start accepting requests. Nothing serves traffic against a
-        // half-registered container.
+        // Configuration loads first, then the modules are composed in
+        // dependency order, every component is built once, and only then does
+        // the server start accepting requests. Nothing serves traffic against
+        // a half-built graph.
         //
         // `Flight.run` rather than `main() async throws`: an error escaping
         // `main` is reported by the Swift runtime as "Fatal error: Error
