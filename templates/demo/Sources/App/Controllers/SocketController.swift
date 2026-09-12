@@ -5,29 +5,28 @@ import FlightWeb
 
 /// The WebSocket entry point, as a route like any other.
 ///
-/// `@WebSocketRoute` rather than `container.registerChannelSocket("/socket")`
-/// in the module body. The two do the same work — the convenience is a thin
-/// wrapper over `registerRoute(.get, path, kind: .upgrade(.webSocket))` — but
-/// only the declared form is visible to the build. A route registered from a
-/// module body is arbitrary Swift, so nothing can enumerate it at compile
-/// time, and the static route manifest the framework emits cannot include it.
+/// `@WebSocketRoute` declares the upgrade route as an annotation — a thin
+/// wrapper over a `.get` route with `kind: .upgrade(.webSocket)` — so the build
+/// sees it. A socket route a module built by hand as a `RouteRegistration`
+/// value would work too, but values assembled at run time can't be enumerated
+/// at compile time, so the static route manifest the framework emits would not
+/// include it. The declared form keeps it on the map.
 ///
-/// It also removes a `context.resolve` from application code: the validator
-/// arrives by injection, which is the ordinary way a controller gets a
-/// dependency.
+/// The validator and the socket stack arrive by injection, the ordinary way a
+/// controller gets a dependency.
 @Controller
 struct SocketController {
 
-    /// The same validator `AppModule` registers for HTTP requests. Injected
-    /// rather than resolved from the context, so the dependency is visible in
-    /// the type rather than discovered when the closure runs.
+    /// The same validator `DemoAuthModule` provides for HTTP requests. Injected
+    /// rather than pulled from the context, so the dependency is visible in the
+    /// type rather than discovered when the closure runs.
     ///
-    /// The marker acknowledges that this one is registered by hand — the
-    /// bring-your-own-auth seam in `AppModule.configure` — rather than
-    /// scanned from an annotation. Without it the build warns, correctly:
-    /// the scanner cannot see a `container.register` call, so an unmarked
-    /// @Inject of a type it never found is usually a missing registration
-    /// that would fail at startup.
+    /// The marker acknowledges that this one is provided by a module — the
+    /// bring-your-own-auth seam, `DemoAuthModule`'s `tokenValidator` value —
+    /// rather than scanned from an annotation. Without it the build warns,
+    /// correctly: the scanner can't see a module-provided value, so an unmarked
+    /// @Inject of a type it never found as a @Component is usually a missing
+    /// dependency that would fail composition.
     // flight:hand-registered
     @Inject var validator: any TokenValidator
 

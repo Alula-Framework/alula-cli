@@ -14,9 +14,9 @@ struct HealthControllerTests {
 
     @Test("the index route answers with the configured application name")
     func index() async throws {
-        // `AppModule` now depends on the Postgres module, which requires the
-        // datasource URL at container freeze. Nothing dials it here —
-        // `configure` is registration only, no I/O — but the key must exist,
+        // `AppModule` now depends on the Postgres module, which needs the
+        // datasource URL when the module is built. Nothing dials it here —
+        // building the module opens no connection — but the key must exist,
         // which is the point: a missing one fails at startup, not at the
         // first request that needed it.
         let configuration = Configuration(values: [

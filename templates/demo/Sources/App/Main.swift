@@ -18,9 +18,6 @@ import FlightWeb
 /// because `Principal` already has everything the protocol asks for.
 extension Principal: @retroactive ChannelPrincipal {}
 
-/// Registers everything the build plugin found — every @Component,
-/// @Controller, @Service and @Repository in this target — through the one
-/// registration pipeline.
 /// The bring-your-own-auth seam: `FlightSecurityModule` wires the
 /// authentication machinery but supplies no validator, so this is the choice.
 ///
@@ -99,9 +96,10 @@ struct AppModule: FlightModule {
 @main
 struct Main {
     static func main() async {
-        // Steps 1–3: Flight Config (flight.yaml + FLIGHT_* env). Steps 4–9:
-        // container, module DAG, freeze, ServiceGroup — request serving
-        // starts only after the whole DAG has registered.
+        // Configuration loads first (flight.yaml + FLIGHT_* env), then the
+        // modules are composed in dependency order, every component is built
+        // once, the ServiceGroup starts, and only then does request serving
+        // begin — never against a half-built graph.
         //
         // `Flight.run` rather than `main() async throws`: an error escaping
         // `main` is reported by the Swift runtime as "Fatal error: Error

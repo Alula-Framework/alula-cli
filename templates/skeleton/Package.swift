@@ -18,7 +18,7 @@ let package = Package(
         // `traits:` names what you want from flight, and nothing else is
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
-        // container and lifecycle.
+        // core: configuration, composition, and the service lifecycle.
         .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.16.0", traits: ["Web"])
     ],
     targets: [

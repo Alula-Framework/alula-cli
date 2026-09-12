@@ -7,10 +7,10 @@ import Testing
 
 /// A scheduled job is an ordinary method on an ordinary component.
 ///
-/// No scheduler and no database: `ChatJobs` is resolved from a test container
-/// with the digest reads stubbed, exactly as `UserServiceTests` resolves a
-/// service with its repository stubbed. Whether the job fires at 03:00 is the
-/// cron engine's business and is tested there, not here.
+/// No scheduler and no database: `ChatJobs` is built directly with the digest
+/// reads stubbed, exactly as `UserServiceTests` builds a service with its
+/// repository stubbed. Whether the job fires at 03:00 is the cron engine's
+/// business and is tested there, not here.
 @Suite("ChatJobs — jobs as plain methods")
 struct ChatJobsTests {
 
