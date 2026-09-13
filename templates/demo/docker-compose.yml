@@ -1,0 +1,55 @@
+# The database this project expects, in one command:
+#
+#     docker compose up -d
+#
+# The credentials, port and database name below match `datasource.primary.url`
+# in flight.yaml exactly, so `swift run` works immediately after this comes up
+# with nothing else to configure.
+#
+# Port 55432, not 5432, deliberately: a Postgres already installed on the host
+# owns the default port, and a project that silently connected to *that* would
+# be reading and writing someone's real data. A non-default port cannot collide
+# by accident.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: flight
+      POSTGRES_DB: flight_demo
+    ports:
+      - '127.0.0.1:55432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # Bound to 127.0.0.1 rather than 0.0.0.0: a development database with a
+    # known password should not be reachable from the network.
+    security_opt:
+      - no-new-privileges:true
+    # `depends_on: condition: service_healthy` in your own services, and
+    # `docker compose up --wait`, both rely on this.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d flight_demo']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  postgres-data:
+
+# ── Running the tests against a real database ────────────────────────────────
+#
+# Tests should not share the database you are developing against: a test that
+# empties a table would take your development data with it. Create a separate
+# one on this same server, once:
+#
+#     docker compose exec postgres createdb -U postgres flight_demo_test
+#
+# then point the tests at it, e.g.
+#
+#     export DATABASE_URL="postgres://postgres:flight@127.0.0.1:55432/flight_demo_test?sslmode=disable"
+#
+# The tests this project ships need no database at all. Controllers and services
+# are built with fakes and asserted on directly, channels run over an in-memory
+# transport, and the bootstrap test supplies a datasource URL that nothing dials.
+# That is the tier most tests belong in. A database is needed only for the
+# smaller tier that exercises real SQL.

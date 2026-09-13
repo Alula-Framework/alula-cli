@@ -207,10 +207,10 @@ struct AppModule: FlightModule {
 @main
 struct Main {
     static func main() async {
-        // Configuration loads first, then the container is built, the module
-        // DAG configures, the container freezes, and only then does the
-        // server start accepting requests. Nothing serves traffic against a
-        // half-registered container.
+        // Configuration loads first, then the modules are composed in
+        // dependency order, every component is built once, and only then does
+        // the server start accepting requests. Nothing serves traffic against
+        // a half-built graph.
         //
         // `Flight.run` rather than `main() async throws`: an error escaping
         // `main` is reported by the Swift runtime as "Fatal error: Error
@@ -376,9 +376,9 @@ struct HealthControllerTests {
 
     @Test("the index route answers with the configured application name")
     func index() async throws {
-        // `AppModule` now depends on the Postgres module, which requires the
-        // datasource URL at container freeze. Nothing dials it here —
-        // `configure` is registration only, no I/O — but the key must exist,
+        // `AppModule` now depends on the Postgres module, which needs the
+        // datasource URL when the module is built. Nothing dials it here —
+        // building the module opens no connection — but the key must exist,
         // which is the point: a missing one fails at startup, not at the
         // first request that needed it.
         let configuration = Configuration(values: [
@@ -548,6 +548,63 @@ private struct UserPayload: Decodable {
     let name: String
     let email: String
 }
+
+"""#,
+            "docker-compose.yml": #"""
+# The database this project expects, in one command:
+#
+#     docker compose up -d
+#
+# The credentials, port and database name below match `datasource.primary.url`
+# in flight.yaml exactly, so `swift run` works immediately after this comes up
+# with nothing else to configure.
+#
+# Port 55432, not 5432, deliberately: a Postgres already installed on the host
+# owns the default port, and a project that silently connected to *that* would
+# be reading and writing someone's real data. A non-default port cannot collide
+# by accident.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: flight
+      POSTGRES_DB: app_dev
+    ports:
+      - '127.0.0.1:55432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # Bound to 127.0.0.1 rather than 0.0.0.0: a development database with a
+    # known password should not be reachable from the network.
+    security_opt:
+      - no-new-privileges:true
+    # `depends_on: condition: service_healthy` in your own services, and
+    # `docker compose up --wait`, both rely on this.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d app_dev']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  postgres-data:
+
+# ── Running the tests against a real database ────────────────────────────────
+#
+# Tests should not share the database you are developing against: a test that
+# empties a table would take your development data with it. Create a separate
+# one on this same server, once:
+#
+#     docker compose exec postgres createdb -U postgres app_test
+#
+# then point the tests at it, e.g.
+#
+#     export DATABASE_URL="postgres://postgres:flight@127.0.0.1:55432/app_test?sslmode=disable"
+#
+# The tests this project ships need no database at all — they construct
+# controllers with mocked repositories and assert on what the method returns.
+# That is the tier most tests belong in. A database is needed only for the
+# smaller tier that exercises real SQL.
 
 """#,
             "flight.yaml": #"""
@@ -1156,7 +1213,7 @@ struct ChatController {
                 payload: RoomChannel.wire(message))
         }
         // The digests are derived from this table; a write makes them stale.
-        try await digests.messagesChanged()
+        await digests.messagesChanged()
 
         return try .json(stored, status: .created)
     }
@@ -1234,7 +1291,7 @@ struct ChatController {
             throw HTTPError(.badRequest, "before must be an ISO 8601 timestamp")
         }
         let purged = try await chat.purge(before: cutoff)
-        try await digests.messagesChanged()
+        await digests.messagesChanged()
         return try .json(["purged": purged])
     }
 
@@ -1346,29 +1403,28 @@ import FlightWeb
 
 /// The WebSocket entry point, as a route like any other.
 ///
-/// `@WebSocketRoute` rather than `container.registerChannelSocket("/socket")`
-/// in the module body. The two do the same work — the convenience is a thin
-/// wrapper over `registerRoute(.get, path, kind: .upgrade(.webSocket))` — but
-/// only the declared form is visible to the build. A route registered from a
-/// module body is arbitrary Swift, so nothing can enumerate it at compile
-/// time, and the static route manifest the framework emits cannot include it.
+/// `@WebSocketRoute` declares the upgrade route as an annotation — a thin
+/// wrapper over a `.get` route with `kind: .upgrade(.webSocket)` — so the build
+/// sees it. A socket route a module built by hand as a `RouteRegistration`
+/// value would work too, but values assembled at run time can't be enumerated
+/// at compile time, so the static route manifest the framework emits would not
+/// include it. The declared form keeps it on the map.
 ///
-/// It also removes a `context.resolve` from application code: the validator
-/// arrives by injection, which is the ordinary way a controller gets a
-/// dependency.
+/// The validator and the socket stack arrive by injection, the ordinary way a
+/// controller gets a dependency.
 @Controller
 struct SocketController {
 
-    /// The same validator `AppModule` registers for HTTP requests. Injected
-    /// rather than resolved from the context, so the dependency is visible in
-    /// the type rather than discovered when the closure runs.
+    /// The same validator `DemoAuthModule` provides for HTTP requests. Injected
+    /// rather than pulled from the context, so the dependency is visible in the
+    /// type rather than discovered when the closure runs.
     ///
-    /// The marker acknowledges that this one is registered by hand — the
-    /// bring-your-own-auth seam in `AppModule.configure` — rather than
-    /// scanned from an annotation. Without it the build warns, correctly:
-    /// the scanner cannot see a `container.register` call, so an unmarked
-    /// @Inject of a type it never found is usually a missing registration
-    /// that would fail at startup.
+    /// The marker acknowledges that this one is provided by a module — the
+    /// bring-your-own-auth seam, `DemoAuthModule`'s `tokenValidator` value —
+    /// rather than scanned from an annotation. Without it the build warns,
+    /// correctly: the scanner can't see a module-provided value, so an unmarked
+    /// @Inject of a type it never found as a @Component is usually a missing
+    /// dependency that would fail composition.
     // flight:hand-registered
     @Inject var validator: any TokenValidator
 
@@ -1684,9 +1740,6 @@ import FlightWeb
 /// because `Principal` already has everything the protocol asks for.
 extension Principal: @retroactive ChannelPrincipal {}
 
-/// Registers everything the build plugin found — every @Component,
-/// @Controller, @Service and @Repository in this target — through the one
-/// registration pipeline.
 /// The bring-your-own-auth seam: `FlightSecurityModule` wires the
 /// authentication machinery but supplies no validator, so this is the choice.
 ///
@@ -1765,9 +1818,10 @@ struct AppModule: FlightModule {
 @main
 struct Main {
     static func main() async {
-        // Steps 1–3: Flight Config (flight.yaml + FLIGHT_* env). Steps 4–9:
-        // container, module DAG, freeze, ServiceGroup — request serving
-        // starts only after the whole DAG has registered.
+        // Configuration loads first (flight.yaml + FLIGHT_* env), then the
+        // modules are composed in dependency order, every component is built
+        // once, the ServiceGroup starts, and only then does request serving
+        // begin — never against a half-built graph.
         //
         // `Flight.run` rather than `main() async throws`: an error escaping
         // `main` is reported by the Swift runtime as "Fatal error: Error
@@ -3017,10 +3071,10 @@ import Testing
 
 /// A scheduled job is an ordinary method on an ordinary component.
 ///
-/// No scheduler and no database: `ChatJobs` is resolved from a test container
-/// with the digest reads stubbed, exactly as `UserServiceTests` resolves a
-/// service with its repository stubbed. Whether the job fires at 03:00 is the
-/// cron engine's business and is tested there, not here.
+/// No scheduler and no database: `ChatJobs` is built directly with the digest
+/// reads stubbed, exactly as `UserServiceTests` builds a service with its
+/// repository stubbed. Whether the job fires at 03:00 is the cron engine's
+/// business and is tested there, not here.
 @Suite("ChatJobs — jobs as plain methods")
 struct ChatJobsTests {
 
@@ -3777,6 +3831,64 @@ struct UserServiceTests {
 }
 
 """#,
+            "docker-compose.yml": #"""
+# The database this project expects, in one command:
+#
+#     docker compose up -d
+#
+# The credentials, port and database name below match `datasource.primary.url`
+# in flight.yaml exactly, so `swift run` works immediately after this comes up
+# with nothing else to configure.
+#
+# Port 55432, not 5432, deliberately: a Postgres already installed on the host
+# owns the default port, and a project that silently connected to *that* would
+# be reading and writing someone's real data. A non-default port cannot collide
+# by accident.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: flight
+      POSTGRES_DB: flight_demo
+    ports:
+      - '127.0.0.1:55432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # Bound to 127.0.0.1 rather than 0.0.0.0: a development database with a
+    # known password should not be reachable from the network.
+    security_opt:
+      - no-new-privileges:true
+    # `depends_on: condition: service_healthy` in your own services, and
+    # `docker compose up --wait`, both rely on this.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d flight_demo']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  postgres-data:
+
+# ── Running the tests against a real database ────────────────────────────────
+#
+# Tests should not share the database you are developing against: a test that
+# empties a table would take your development data with it. Create a separate
+# one on this same server, once:
+#
+#     docker compose exec postgres createdb -U postgres flight_demo_test
+#
+# then point the tests at it, e.g.
+#
+#     export DATABASE_URL="postgres://postgres:flight@127.0.0.1:55432/flight_demo_test?sslmode=disable"
+#
+# The tests this project ships need no database at all. Controllers and services
+# are built with fakes and asserted on directly, channels run over an in-memory
+# transport, and the bootstrap test supplies a datasource URL that nothing dials.
+# That is the tier most tests belong in. A database is needed only for the
+# smaller tier that exercises real SQL.
+
+"""#,
             "flight.yaml": #"""
 app:
   name: App
@@ -3847,7 +3959,7 @@ let package = Package(
         // `traits:` names what you want from flight, and nothing else is
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
-        // container and lifecycle.
+        // core: configuration, composition, and the service lifecycle.
         .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.16.0", traits: ["Web"])
     ],
     targets: [
@@ -3929,10 +4041,10 @@ struct AppModule: FlightModule {
 @main
 struct Main {
     static func main() async {
-        // Configuration loads first, then the container is built, the module
-        // DAG configures, the container freezes, and only then does the
-        // server start accepting requests. Nothing serves traffic against a
-        // half-registered container.
+        // Configuration loads first, then the modules are composed in
+        // dependency order, every component is built once, and only then does
+        // the server start accepting requests. Nothing serves traffic against
+        // a half-built graph.
         //
         // `Flight.run` rather than `main() async throws`: an error escaping
         // `main` is reported by the Swift runtime as "Fatal error: Error
