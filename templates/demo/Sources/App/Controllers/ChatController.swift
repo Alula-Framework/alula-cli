@@ -240,7 +240,7 @@ struct ChatController {
                 payload: RoomChannel.wire(message))
         }
         // The digests are derived from this table; a write makes them stale.
-        try await digests.messagesChanged()
+        await digests.messagesChanged()
 
         return try .json(stored, status: .created)
     }
@@ -318,7 +318,7 @@ struct ChatController {
             throw HTTPError(.badRequest, "before must be an ISO 8601 timestamp")
         }
         let purged = try await chat.purge(before: cutoff)
-        try await digests.messagesChanged()
+        await digests.messagesChanged()
         return try .json(["purged": purged])
     }
 
