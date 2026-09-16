@@ -6,25 +6,104 @@ import Testing
 
 @testable import App
 
-/// The controller, its routes, and its status codes — with a fake repository
-/// underneath and no database anywhere.
+/// A controller is a struct and a route is one of its methods, so the default
+/// test constructs the type with a fake and calls the method. No router, no
+/// HTTP, no fixtures to register — `UserController(users:)` is the whole setup,
+/// because `@Controller` only *adds* members and never rewrites your method.
 ///
-/// `Components` registers exactly the components under test, the same way the
-/// application registers them; the fake is registered under the protocol the
-/// controller depends on. Routing, middleware, dependency injection, request
-/// decoding, and JSON encoding all run for real. `TestClient` dispatches in
-/// process, so there is no socket and no port to collide with — the tests are
-/// fast because the network is absent, not because the framework is stubbed.
-@Suite("User routes")
+/// The end-to-end suite below is deliberately much smaller. Both tiers matter,
+/// but they answer different questions, and most questions belong here.
+@Suite("User routes — called directly")
 struct UserControllerTests {
 
+    private func controller(_ users: InMemoryUsers = InMemoryUsers([ada])) -> UserController {
+        UserController(users: users)
+    }
+
+    @Test("listing returns the rows the repository holds")
+    func list() async throws {
+        let users = try await controller().list(.mock())
+        #expect(users.map(\.name) == ["Ada"])
+    }
+
+    /// `get` returns a `User` — the domain value, not a `Response`. Encoding it
+    /// to JSON is the framework's job at the boundary, so the unit test asserts
+    /// on the value and leaves the wire format to the end-to-end tier.
+    @Test("fetching by id returns that user")
+    func getByID() async throws {
+        let user = try await controller().get(.mock(pathParameters: ["id": ada.id.uuidString]))
+        #expect(user.email == ada.email)
+    }
+
+    /// Failures arrive as a thrown `HTTPError`, so the cause is assertable
+    /// without HTTP. That an error *becomes* a 400 or a 404 on the wire is a
+    /// separate claim, proved once in the end-to-end suite.
+    @Test("an id that is not a UUID is refused")
+    func malformedID() async {
+        await #expect(throws: HTTPError.self) {
+            _ = try await controller().get(.mock(pathParameters: ["id": "not-a-uuid"]))
+        }
+    }
+
+    @Test("an unknown id is refused")
+    func unknownID() async {
+        await #expect(throws: HTTPError.self) {
+            _ = try await controller().get(.mock(pathParameters: ["id": UUID().uuidString]))
+        }
+    }
+
+    /// `create` returns a `Response` because it sets a status, so this one
+    /// inspects the response *and* the effect — the fake is a real object the
+    /// test can interrogate afterwards.
+    @Test("creating a user returns 201, and the row is really stored")
+    func create() async throws {
+        let users = InMemoryUsers()
+        let response = try await controller(users).create(
+            .mock(), body: CreateUserRequest(name: "Grace", email: "grace@example.com"))
+
+        #expect(response.status == .created)
+        #expect(try response.decodeJSON(UserPayload.self).name == "Grace")
+        #expect(users.stored.map(\.email) == ["grace@example.com"])
+    }
+
+    @Test("an invalid email is refused before any SQL would run")
+    func invalidEmail() async throws {
+        let users = InMemoryUsers()
+        await #expect(throws: HTTPError.self) {
+            _ = try await controller(users).create(
+                .mock(), body: CreateUserRequest(name: "Nope", email: "not-an-email"))
+        }
+        #expect(users.stored.isEmpty, "validation must run before the write")
+    }
+
+    @Test("a duplicate email is refused, not stored a second time")
+    func duplicateEmail() async throws {
+        let users = InMemoryUsers([ada])
+        await #expect(throws: HTTPError.self) {
+            _ = try await controller(users).create(
+                .mock(), body: CreateUserRequest(name: "Ada Again", email: ada.email))
+        }
+        #expect(users.stored.count == 1)
+    }
+}
+
+/// The plumbing tier: that a path routes, a body decodes, a return value
+/// encodes, and a thrown error becomes the right status. None of that is
+/// visible to a direct call, and none of it needs repeating per handler — a
+/// few representative paths prove the wiring once.
+///
+/// `TestClient` dispatches in process through the real router and encoders, so
+/// there is no socket and no port to collide with.
+@Suite("User routes — end to end")
+struct UserRoutesEndToEndTests {
+
     private func client(_ users: InMemoryUsers = InMemoryUsers([ada])) throws -> TestClient {
-        // The controller under test, built with the fake repository the way a
-        // route factory constructs it per request — no container, and the fake
-        // is a plain value passed in.
         let make: @Sendable (RequestContext) throws -> UserController = { _ in
             UserController(users: users)
         }
+        // Each route is wired in by its generated factory. Whole-controller
+        // registration is a per-route list today; the composition root does the
+        // same thing from `flightRoutes(graph)`.
         return try TestClient(routes: [
             UserController._flightRoute_list_0(make),
             UserController._flightRoute_get_1(make),
@@ -32,61 +111,42 @@ struct UserControllerTests {
         ])
     }
 
-    @Test("listing returns the rows the repository holds")
-    func list() async throws {
-        let response = await (try client()).get("/users")
-        #expect(response.status == .ok)
-        #expect(try response.decodeJSON([UserPayload].self).map(\.name) == ["Ada"])
-    }
-
-    @Test("fetching by id returns that user")
-    func getByID() async throws {
+    /// Status, headers and body shape — the three things a client actually
+    /// sees, and the three a direct call cannot show you.
+    @Test("GET /users/:id routes, encodes, and answers as JSON")
+    func getRoutesAndEncodes() async throws {
         let response = await (try client()).get("/users/\(ada.id)")
+
         #expect(response.status == .ok)
-        #expect(try response.decodeJSON(UserPayload.self).email == ada.email)
+        #expect(response.headers[.contentType]?.contains("json") == true)
+
+        // Decoded into a wire-shaped struct rather than back into `User`: an
+        // entity with associations is Encodable but deliberately not Decodable,
+        // because once an unloaded association has crossed the wire as `null`,
+        // "not loaded" and "loaded and empty" are indistinguishable. The payload
+        // type also states what this endpoint is *supposed* to return.
+        let decoded = try response.decodeJSON(UserPayload.self)
+        #expect(decoded.id == ada.id)
+        #expect(decoded.email == ada.email)
     }
 
-    @Test("an id that is not a UUID is a 400, not a 500")
-    func malformedID() async throws {
-        #expect(await (try client()).get("/users/not-a-uuid").status == .badRequest)
-    }
-
-    @Test("an unknown id is a 404")
-    func unknownID() async throws {
-        #expect(await (try client()).get("/users/\(UUID())").status == .notFound)
-    }
-
-    @Test("creating a user returns 201, and the row is really stored")
-    func create() async throws {
+    @Test("POST /users decodes the body and answers 201")
+    func createDecodesAndReports201() async throws {
         let users = InMemoryUsers()
-        let response = try await client(users).post(
+        let response = try await (try client(users)).post(
             "/users", json: CreateUserRequest(name: "Grace", email: "grace@example.com"))
 
         #expect(response.status == .created)
         #expect(try response.decodeJSON(UserPayload.self).name == "Grace")
-        // Asserting on the effect, not just the response: the fake is a real
-        // object a test can interrogate afterwards.
-        #expect(users.stored.map(\.email) == ["grace@example.com"])
-    }
-
-    @Test("an invalid email is refused before any SQL would run")
-    func invalidEmail() async throws {
-        let users = InMemoryUsers()
-        let response = try await client(users).post(
-            "/users", json: CreateUserRequest(name: "Nope", email: "not-an-email"))
-
-        #expect(response.status == .badRequest)
-        #expect(users.stored.isEmpty, "validation must run before the write")
-    }
-
-    @Test("a duplicate email is a conflict, not a second row")
-    func duplicateEmail() async throws {
-        let users = InMemoryUsers([ada])
-        let response = try await client(users).post(
-            "/users", json: CreateUserRequest(name: "Ada Again", email: ada.email))
-
-        #expect(response.status == .conflict)
         #expect(users.stored.count == 1)
+    }
+
+    /// The mapping the unit tests deliberately leave unproven: a thrown
+    /// `HTTPError` becoming a status code on the wire.
+    @Test("a thrown HTTPError becomes the status the client sees")
+    func errorsBecomeStatuses() async throws {
+        #expect(await (try client()).get("/users/not-a-uuid").status == .badRequest)
+        #expect(await (try client()).get("/users/\(UUID())").status == .notFound)
     }
 }
 

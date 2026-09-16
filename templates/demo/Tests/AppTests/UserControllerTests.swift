@@ -5,20 +5,90 @@ import Foundation
 import Testing
 @testable import App
 
-/// UserController and UserService, with a fake repository underneath.
+/// A controller is a struct and a route is one of its methods, so the default
+/// test builds the type with a fake and calls the method — no router, no HTTP.
+/// `@Controller` only *adds* members (an initializer and the route factories);
+/// it never rewrites your method, so `getUser` stays an ordinary function.
 ///
-/// `Components` registers exactly what is under test, the same way the
-/// application registers it. Routing, middleware, dependency injection, and
-/// JSON encoding all run for real; only the database is absent.
+/// The end-to-end suite below is deliberately smaller: it exists to prove the
+/// wiring once, not to re-test the logic.
 let ada = User(
     id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
     name: "Ada", email: "ada@example.com", createdAt: Date(), updatedAt: Date())
 
-@Suite("UserController — repository mocked, everything above it real")
+@Suite("UserController — called directly")
 struct UserControllerTests {
-    /// The controller's routes, built the way a route factory does per request:
-    /// the mock repository feeds a real `UserService`, which feeds the controller.
-    private func userClient(_ repository: MockUserRepository) throws -> TestClient {
+
+    private func controller(_ repository: MockUserRepository) -> UserController {
+        UserController(users: UserService(repository: repository))
+    }
+
+    @Test("listUsers returns what the repository holds")
+    func listUsers() async throws {
+        let users = try await controller(MockUserRepository(users: [ada])).listUsers(.mock())
+        #expect(users.map(\.email) == [ada.email])
+    }
+
+    /// `getUser` returns a `User` — the domain value, not a `Response`. Turning
+    /// it into JSON and a status is the framework's job at the boundary, so the
+    /// unit test asserts the value and leaves the wire format to the tier below.
+    @Test("getUser returns the mocked user")
+    func getUser() async throws {
+        let user = try await controller(MockUserRepository(users: [ada]))
+            .getUser(.mock(pathParameters: ["id": ada.id.uuidString]))
+        #expect(user.id == ada.id)
+        #expect(user.email == ada.email)
+    }
+
+    /// The failure arrives as a thrown `HTTPError`, so its cause is assertable
+    /// without HTTP. That it *becomes* a 404 on the wire is a separate claim,
+    /// proved once end to end.
+    @Test("getUser refuses an unknown id")
+    func getUserUnknown() async {
+        await #expect(throws: HTTPError.self) {
+            _ = try await controller(MockUserRepository(users: [ada]))
+                .getUser(.mock(pathParameters: ["id": UUID().uuidString]))
+        }
+    }
+
+    @Test("getUser refuses an id that is not a UUID")
+    func getUserMalformed() async {
+        await #expect(throws: HTTPError.self) {
+            _ = try await controller(MockUserRepository(users: [ada]))
+                .getUser(.mock(pathParameters: ["id": "not-a-uuid"]))
+        }
+    }
+
+    /// The update half of `upsertUser`: an existing email takes the changeset
+    /// path. `upsertUser` returns a `Response` because it encodes directly, so
+    /// this asserts the response *and* the effect — `appliedChangesets` is the
+    /// fake recording that a write was actually attempted.
+    @Test("upsertUser updates an existing user and records the changeset")
+    func upsertExisting() async throws {
+        let repository = MockUserRepository(users: [ada])
+        let response = try await controller(repository).upsertUser(
+            .mock(), body: CreateUserRequest(name: "Ada Lovelace", email: ada.email))
+
+        #expect(response.status == .ok)
+        #expect(try response.decodeJSON(UserPayload.self).email == ada.email)
+        #expect(repository.appliedChangesets.count == 1)
+    }
+
+    // NOTE: the `signup` path (`createUser`, and `upsertUser` with an unseen
+    // email) is not covered here. `MockUserRepository.apply` records a changeset
+    // without applying it, while `UserService.signup` does
+    // `apply(...)` then `find(byEmail:)!` — so against this fake the
+    // force-unwrap would trap rather than fail an expectation. Covering it means
+    // teaching the fake to apply what it records; see the template's TODO.
+}
+
+/// The plumbing tier: that a path routes, a body decodes, a return value
+/// encodes, and a thrown error becomes the right status. A direct call shows
+/// none of that — and none of it needs repeating per handler.
+@Suite("UserController — end to end")
+struct UserRoutesEndToEndTests {
+
+    private func client(_ repository: MockUserRepository) throws -> TestClient {
         let make: @Sendable (RequestContext) throws -> UserController = { _ in
             UserController(users: UserService(repository: repository))
         }
@@ -29,13 +99,17 @@ struct UserControllerTests {
             UserController._flightRoute_createUser_3(make),
         ])
     }
-    @Test("GET /user/:id returns the mocked user as JSON")
-    func getUserReturnsMockedUser() async throws {
-        let client = try userClient(MockUserRepository(users: [ada]))
 
-        let response = await client.get("/user/\(ada.id)")
+    /// Status, headers and body shape — the three things a client actually
+    /// sees, and the three a direct call cannot show you.
+    @Test("GET /user/:id routes, encodes, and answers as JSON")
+    func getUserRoutesAndEncodes() async throws {
+        let response = await (try client(MockUserRepository(users: [ada])))
+            .get("/user/\(ada.id)")
 
         #expect(response.status == .ok)
+        #expect(response.headers[.contentType]?.contains("json") == true)
+
         // Decoded into a wire-shaped struct, not back into `User`. An entity
         // with associations is Encodable but deliberately not Decodable:
         // `Loadable` cannot tell "association not preloaded" from "preloaded
@@ -49,18 +123,18 @@ struct UserControllerTests {
         #expect(decoded.authored == nil)
     }
 
-    @Test("GET /user/:id 404s when the mocked repository has no match")
-    func getUserReturnsNotFoundWhenMissing() async throws {
-        let client = try userClient(MockUserRepository(users: [ada]))
-
-        let response = await client.get("/user/\(UUID())")
-
+    /// The mapping the unit tests deliberately leave unproven: a thrown
+    /// `HTTPError` becoming a status code on the wire.
+    @Test("a thrown HTTPError becomes the status the client sees")
+    func errorsBecomeStatuses() async throws {
+        let response = await (try client(MockUserRepository(users: [ada])))
+            .get("/user/\(UUID())")
         #expect(response.status == .notFound)
     }
 }
 
 /// The JSON shape `User` encodes to — the read side of the seam described in
-/// `getUserReturnsMockedUser`.
+/// `getUserRoutesAndEncodes`.
 private struct UserPayload: Decodable {
     let id: UUID
     let name: String
