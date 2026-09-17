@@ -98,17 +98,11 @@ struct UserControllerTests {
 struct UserRoutesEndToEndTests {
 
     private func client(_ users: InMemoryUsers = InMemoryUsers([ada])) throws -> TestClient {
-        let make: @Sendable (RequestContext) throws -> UserController = { _ in
-            UserController(users: users)
-        }
-        // Each route is wired in by its generated factory. Whole-controller
-        // registration is a per-route list today; the composition root does the
-        // same thing from `flightRoutes(graph)`.
-        return try TestClient(routes: [
-            UserController._flightRoute_list_0(make),
-            UserController._flightRoute_get_1(make),
-            UserController._flightRoute_create_2(make),
-        ])
+        // `flightRoutes` is generated alongside the per-route factories and
+        // returns all of them, so nothing here names a route by position — add
+        // a route to the controller and this keeps working unchanged.
+        return try TestClient(
+            routes: UserController.flightRoutes { _ in UserController(users: users) })
     }
 
     /// Status, headers and body shape — the three things a client actually

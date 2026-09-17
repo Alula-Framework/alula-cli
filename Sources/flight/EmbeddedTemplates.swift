@@ -26,7 +26,7 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.16.0", traits: ["Web"]),
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.18.0", traits: ["Web"]),
         .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.6.0", traits: ["Postgres"]),
     ],
     targets: [
@@ -547,17 +547,11 @@ struct UserControllerTests {
 struct UserRoutesEndToEndTests {
 
     private func client(_ users: InMemoryUsers = InMemoryUsers([ada])) throws -> TestClient {
-        let make: @Sendable (RequestContext) throws -> UserController = { _ in
-            UserController(users: users)
-        }
-        // Each route is wired in by its generated factory. Whole-controller
-        // registration is a per-route list today; the composition root does the
-        // same thing from `flightRoutes(graph)`.
-        return try TestClient(routes: [
-            UserController._flightRoute_list_0(make),
-            UserController._flightRoute_get_1(make),
-            UserController._flightRoute_create_2(make),
-        ])
+        // `flightRoutes` is generated alongside the per-route factories and
+        // returns all of them, so nothing here names a route by position — add
+        // a route to the controller and this keeps working unchanged.
+        return try TestClient(
+            routes: UserController.flightRoutes { _ in UserController(users: users) })
     }
 
     /// Status, headers and body shape — the three things a client actually
@@ -719,7 +713,7 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.16.0", traits: ["Security"]),
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.18.0", traits: ["Security"]),
         .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.6.0", traits: ["Postgres"]),
     ],
     targets: [
@@ -2975,9 +2969,8 @@ struct AttachmentControllerTests {
 
     @Test("a file and its form fields arrive, sizes intact")
     func uploadRoundTrip() async throws {
-        let client = try TestClient(routes: [
-            AttachmentController._flightRoute_upload_0 { _ in AttachmentController() }
-        ])
+        let client = try TestClient(
+            routes: AttachmentController.flightRoutes { _ in AttachmentController() })
 
         let boundary = "----DemoBoundary"
         let filePayload = String(repeating: "b", count: 50_000)
@@ -3012,9 +3005,8 @@ struct AttachmentControllerTests {
 
     @Test("a body that is not multipart is refused as a 415")
     func nonMultipartRefused() async throws {
-        let client = try TestClient(routes: [
-            AttachmentController._flightRoute_upload_0 { _ in AttachmentController() }
-        ])
+        let client = try TestClient(
+            routes: AttachmentController.flightRoutes { _ in AttachmentController() })
         let response = await client.post(
             "/attachments",
             headers: [.contentType: "application/json"],
@@ -3303,10 +3295,10 @@ private struct Harness {
         // stack from the channels module. This is what exercises the upgrade
         // path users actually get.
         let sockets = channels.sockets
-        let socketRoute = SocketController._flightRoute_socket_0 { _ in
+        let socketRoutes = SocketController.flightRoutes { _ in
             SocketController(validator: DemoTokenValidator(), sockets: sockets)
         }
-        self.testClient = try TestClient(routes: [socketRoute])
+        self.testClient = try TestClient(routes: socketRoutes)
         self.presence = presence
     }
 
@@ -3870,15 +3862,13 @@ struct UserControllerTests {
 struct UserRoutesEndToEndTests {
 
     private func client(_ repository: MockUserRepository) throws -> TestClient {
-        let make: @Sendable (RequestContext) throws -> UserController = { _ in
-            UserController(users: UserService(repository: repository))
-        }
-        return try TestClient(routes: [
-            UserController._flightRoute_listUsers_0(make),
-            UserController._flightRoute_getUser_1(make),
-            UserController._flightRoute_upsertUser_2(make),
-            UserController._flightRoute_createUser_3(make),
-        ])
+        // `flightRoutes` is generated alongside the per-route factories and
+        // returns all of them, so nothing here names a route by position — add
+        // a route to the controller and this keeps working unchanged.
+        try TestClient(
+            routes: UserController.flightRoutes { _ in
+                UserController(users: UserService(repository: repository))
+            })
     }
 
     /// Status, headers and body shape — the three things a client actually

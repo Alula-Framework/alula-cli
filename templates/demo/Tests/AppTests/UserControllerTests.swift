@@ -89,15 +89,13 @@ struct UserControllerTests {
 struct UserRoutesEndToEndTests {
 
     private func client(_ repository: MockUserRepository) throws -> TestClient {
-        let make: @Sendable (RequestContext) throws -> UserController = { _ in
-            UserController(users: UserService(repository: repository))
-        }
-        return try TestClient(routes: [
-            UserController._flightRoute_listUsers_0(make),
-            UserController._flightRoute_getUser_1(make),
-            UserController._flightRoute_upsertUser_2(make),
-            UserController._flightRoute_createUser_3(make),
-        ])
+        // `flightRoutes` is generated alongside the per-route factories and
+        // returns all of them, so nothing here names a route by position — add
+        // a route to the controller and this keeps working unchanged.
+        try TestClient(
+            routes: UserController.flightRoutes { _ in
+                UserController(users: UserService(repository: repository))
+            })
     }
 
     /// Status, headers and body shape — the three things a client actually

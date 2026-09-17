@@ -69,10 +69,10 @@ private struct Harness {
         // stack from the channels module. This is what exercises the upgrade
         // path users actually get.
         let sockets = channels.sockets
-        let socketRoute = SocketController._flightRoute_socket_0 { _ in
+        let socketRoutes = SocketController.flightRoutes { _ in
             SocketController(validator: DemoTokenValidator(), sockets: sockets)
         }
-        self.testClient = try TestClient(routes: [socketRoute])
+        self.testClient = try TestClient(routes: socketRoutes)
         self.presence = presence
     }
 
