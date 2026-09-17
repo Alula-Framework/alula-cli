@@ -36,7 +36,9 @@ registration code. Adding a controller does not mean editing a list. A
 misspelled configuration key is a compile error, not a 3am page.
 
 **Composition is by module, and modules form a DAG.** You choose behaviour by
-adding a module to `bootstrap`, and the framework orders them. Choosing an
+adding a module to the list `main` composes, and the framework orders them.
+A module is a value: what it needs arrives in its initializer, and what it
+offers the rest of the application is a property on it. Choosing an
 HTTP transport is choosing a module. So is adding a database, a cache, or
 authentication.
 
@@ -60,7 +62,7 @@ it — the rest of the tutorial assumes you know what each piece is for.
 Create a directory and a `Package.swift`:
 
 ```swift
-// swift-tools-version: 6.2
+// swift-tools-version: 6.3
 import PackageDescription
 
 let package = Package(
@@ -102,9 +104,11 @@ is the default transport, wrapping HummingbirdCore — a mature, versioned HTTP
 implementation. Flight does not hand-roll HTTP parsing, and any conforming
 transport is a peer of this one.
 
-**The plugin is not optional decoration.** It generates `flightRegisterAll`
-from what it finds in your sources, and checks your `@ConfigValue` keys
-against `flight.yaml` at build time.
+**The plugin is not optional decoration.** It scans your sources and generates
+the composition root from what it finds — `flightComposeModules`, which builds
+your modules in dependency order, and `flightRoutes`, which turns every
+`@GetRoute` into a route value. It also checks your `@ConfigValue` keys against
+`flight.yaml` at build time.
 
 ### Checkpoint
 
@@ -149,54 +153,54 @@ import FlightCore
 import FlightTransport
 import FlightWeb
 
+/// Your application's module: one place that says what this app is made of.
 struct AppModule: FlightModule {
     static var dependencies: [any FlightModule.Type] { [] }
-
-    func configure(_ container: Container) throws {
-        try flightRegisterAll(container)
-    }
 }
 
 @main
 struct Main {
     static func main() async {
-        do {
-            try await Flight.bootstrap(
-                configuration: try Configuration.load(),
-                modules: [
-                    FlightWebModule<FlightTransport>.self,
-                    AppModule.self,
-                    ActuatorModule.self,
-                ]
-            )
-        } catch {
-            FileHandle.standardError.write(
-                Data("App failed to start: \(String(reflecting: error))\n".utf8))
-            exit(1)
-        }
+        await Flight.run(
+            configuration: try Configuration.load(),
+            modules: [
+                FlightWebModule<FlightTransport>.self,
+                AppModule.self,
+                ActuatorModule.self,
+            ],
+            composedBy: flightComposeModules
+        )
     }
 }
 ```
+
+**`AppModule` has no body, and that is the point.** It names the subsystems
+this application is built on — nothing, so far — and nothing else. Every
+`@Controller`, `@Service`, `@Repository`, and `@Component` in your sources is
+found by the plugin and wired by the generated composition root, so adding a
+controller never means editing this file.
+
+`flightComposeModules` does not exist in any file you wrote — the plugin
+generates it from the `modules:` list, and it constructs each module in
+dependency order. That is what lets a module *take* what it needs in its
+initializer. Without the argument, Flight would have to instantiate each module
+from its type, which is why one would then have to be constructible with no
+arguments at all.
 
 `main` is `async`, not `async throws`, and that is worth a sentence. An error
 that escapes `main` is reported by the Swift runtime as "Fatal error: Error
 raised at top level", followed by a register dump and a backtrace. The two
 startup failures you will actually hit — Postgres not running, port 8080
-already bound — are not crashes and should not look like them.
+already bound — are not crashes and should not look like them. `Flight.run`
+prints the reason and exits 1; it is `bootstrap` plus that difference, and an
+embedder that wants the error rather than the exit calls `bootstrap` directly.
 
-`String(reflecting:)` rather than plain interpolation because PostgresNIO
-redacts its `description` on purpose; the reflected form names the host, the
-port and the errno. That is safe on this path specifically: bootstrap has no
-user queries or bind values to leak, and the process is exiting anyway.
-
-`flightRegisterAll` does not exist in any file you wrote — the plugin
-generates it. It will be empty until Stage 1.4, and that is fine.
-
-What `bootstrap` does, in order: load configuration, build the container,
-resolve the module DAG, run every `configure` serially, **freeze** the
-container, then start services. Registration and use are separate phases, so
-nothing serves traffic against a half-registered container, and a missing
-dependency fails at startup naming what was missing.
+What `run` does, in order: load configuration, compose the modules in
+dependency order, build every component **once**, then start services.
+Construction and use are separate phases, so nothing serves traffic against a
+half-built graph, and a dependency that cannot be satisfied is a composition
+error at startup naming what was missing — or, more often, a build error,
+because most of that graph is checked when the plugin generates it.
 
 ### Checkpoint
 
@@ -290,12 +294,11 @@ import Testing
 struct HealthControllerTests {
     @Test("the index route answers with the configured application name")
     func index() async throws {
-        let container = try TestContainer.build(
-            configuration: Configuration(values: ["app.name": "TestApp"])
-        ) {
-            AppModule()
-        }
-        let client = try TestClient(container: container)
+        // The composition root's sequence, by hand: build the graph, then the
+        // routes from it — the values `FlightWebModule` is composed with.
+        let configuration = Configuration(values: ["app.name": "TestApp"])
+        let graph = try FlightGraph(configuration: configuration)
+        let client = try TestClient(routes: flightRoutes(graph))
 
         let response = await client.get("/")
 
@@ -304,6 +307,13 @@ struct HealthControllerTests {
     }
 }
 ```
+
+Two generated things appear here, and they are the same two the application
+uses. `FlightGraph` is every component, built once from its roots —
+`Configuration` is the only root this tier has. `flightRoutes(graph)` is every
+route in the target, built from that graph. `main` composes them through
+`FlightWebModule`; the test hands them to a `TestClient` instead. Nothing is
+mocked, and nothing test-only is involved in either.
 
 `TestClient` dispatches **in process**. There is no socket and no port to
 collide with, but routing, middleware, dependency injection, configuration,
@@ -362,7 +372,7 @@ dependencies: [
     .package(url: "https://github.com/Flight-Framework/flight.git",
              from: "0.18.0", traits: ["Web"]),
     .package(url: "https://github.com/Flight-Framework/flight-data.git",
-             from: "0.18.0", traits: ["Postgres"]),
+             from: "0.6.0", traits: ["Postgres"]),
 ],
 ```
 
@@ -587,17 +597,19 @@ struct UserRepository: UserRepositoryProtocol {
 
     func create(name: String, email: String) async throws -> User {
         let now = Date()
-        return try await repo.insert(
-            User(id: UUID(), name: name, email: email, createdAt: now, updatedAt: now))
+        return try await pool.withRepo { repo in
+            try await repo.insert(
+                User(id: UUID(), name: name, email: email, createdAt: now, updatedAt: now))
+        }
     }
 }
 ```
 
 **Why the protocol?** A struct wrapping a live database scope cannot be
 swapped out. A protocol can. That is the entire reason Stage 2.7's tests can
-run the real controller, real routing, and real dependency injection with no
-database in the loop. Depend on the protocol everywhere except at
-registration.
+run the real controller — and, where it is the point, the real routing and
+encoding — with no database in the loop. Depend on the protocol everywhere;
+the composition root is the one place that names the concrete type.
 
 **Why hold the pool rather than a connection?** Because the borrow is then
 visible. `withRepo` leases for the length of its closure and returns the
@@ -606,13 +618,22 @@ querying, and two statements share a connection exactly when you put them in
 one bracket. A repository that held a connection for the whole request made
 "how long is this borrowed for?" a question about a scope somewhere else.
 
-Finally, tell the container about Postgres — in `Main.swift`:
+Finally, say that this application is built on Postgres — in `Main.swift`:
 
 ```swift
 static var dependencies: [any FlightModule.Type] {
     [PostgresDataModule<PrimaryDataSource>.self]
 }
 ```
+
+That one line is what puts the pool in the component graph, which is what lets
+`@Inject var pool: PostgresDataSource` above resolve. It also gives the graph a
+second root, so `HealthControllerTests` from Stage 1.5 grows a line: build the
+Postgres module, and pass its `dataSource` to `FlightGraph`. Building the
+module opens no connection — but `datasource.primary.url` must now exist in the
+test's `Configuration`, which is the point. A missing key fails at startup
+rather than at the first request that needed it. The updated file is in
+[`templates/basics`](templates/basics/Tests/AppTests/HealthControllerTests.swift).
 
 ## Stage 2.6 — Routes
 
@@ -626,7 +647,7 @@ struct UserController {
     /// what it needs is a property the build wires — visible in the type,
     /// checked when the application is composed, and with no per-request
     /// lookup that could fail.
-    @Inject var users: any UserRepositoryProtocol
+    @Inject var users: (any UserRepositoryProtocol)
 
     @GetRoute("/users")
     func list(_ context: RequestContext) async throws -> [User] {
@@ -692,26 +713,47 @@ kill %1
 
 This is what the dependency injection was for.
 
-The controller depends on `(any UserRepositoryProtocol)`, so a test registers
-a fake under that key and everything above it runs for real:
+`UserController` depends on `(any UserRepositoryProtocol)` rather than on
+`UserRepository`, and `@Controller` generates an initializer over the injected
+properties. Those two facts together mean the default test needs no framework
+at all: a controller is a struct, a route is one of its methods, so the test
+constructs the type with a fake and calls the method.
 
 ```swift
-let container = try TestContainer.build {
-    Components(UserController.self)
-    Fake(users)
-}
-let client = try TestClient(container: container)
+let controller = UserController(users: InMemoryUsers([ada]))
 
-let response = await client.get("/users")
+let listed = try await controller.list(.mock())
+#expect(listed.map(\.name) == ["Ada"])
 ```
 
-`Components` registers exactly the components under test, through the same
-registration thunk the application uses — so the controller reaches the
-container the way it does in production. `TestClient` dispatches **in
-process**: routing, middleware, dependency injection, request decoding, and
-JSON encoding all run, but there is no socket and no port to collide with.
-These tests are fast because the network is absent, not because the framework
-is stubbed.
+`UserController(users:)` is the whole setup. Nothing is registered and nothing
+is looked up — wiring the real repository in is the composition root's job, and
+a unit test is exactly the place that does it by hand instead. The macro only
+*adds* members; it never rewrites your method, so the thing under test is the
+code you wrote.
+
+`RequestContext.mock(...)` builds a context with no transport behind it: path
+parameters, headers and a body when the handler needs them, nothing when it
+does not.
+
+```swift
+let user = try await controller.get(.mock(pathParameters: ["id": ada.id.uuidString]))
+#expect(user.email == ada.email)
+```
+
+**Notice what that asserts on.** `get` returns a `User` — the domain value,
+which is the handler's actual decision — not a `Response`. Turning it into JSON
+and choosing a status happens at the route boundary, so this tier never sees a
+status code and does not need one to prove the right user came back.
+
+Failures are just as direct. A thrown `HTTPError` is assertable without HTTP,
+so proving *why* a request would 404 costs nothing:
+
+```swift
+await #expect(throws: HTTPError.self) {
+    _ = try await controller.get(.mock(pathParameters: ["id": "not-a-uuid"]))
+}
+```
 
 A fake is just a type that conforms. There is no mock framework and nothing
 generated:
@@ -728,50 +770,120 @@ Because it is a real object, a test can interrogate it afterwards — which is
 how you assert on effects rather than only on what came back:
 
 ```swift
-#expect(response.status == .badRequest)
+let users = InMemoryUsers()
+await #expect(throws: HTTPError.self) {
+    _ = try await UserController(users: users).create(
+        .mock(), body: CreateUserRequest(name: "Nope", email: "not-an-email"))
+}
 #expect(users.stored.isEmpty, "validation must run before the write")
 ```
 
-### Three sizes of test
+That last line is the one worth copying. It proves validation ran *before* the
+write — a claim about order that no return value could make.
 
-`Components` is the middle one, and the one you will reach for most:
+### The tier those calls deliberately skip
 
-| | What runs | Use it when |
-|---|---|---|
-| Call the handler | One method | The logic is the point and routing is not |
-| `Components` | The real controller, routing, middleware, DI | Most of the time |
-| `AppModule` + `override` | Every module the application boots | Checking the wiring itself |
-
-The third deserves a word, because it catches a class of bug the other two
-cannot. Registering a fake *alongside* a real module fails — registration is
-first-wins and reports the collision when the container freezes — so swapping
-one seam in a fully booted application uses `override`:
+A direct call never proves that a path routes, a body decodes, a return value
+encodes, or a thrown error becomes the right status. None of that is visible to
+a method call, and none of it needs repeating per handler. A few representative
+paths prove the plumbing once:
 
 ```swift
-let container = try TestContainer.build {
-    AppModule()
-} overriding: { container in
-    container.override((any UserRepositoryProtocol).self, scope: .singleton) { _ in users }
+let users = InMemoryUsers([ada])
+let client = try TestClient(
+    routes: UserController.flightRoutes { _ in UserController(users: users) })
+
+let response = await client.get("/users/\(ada.id)")
+
+#expect(response.status == .ok)
+#expect(response.headers[.contentType]?.contains("json") == true)
+#expect(try response.decodeJSON(UserPayload.self).email == ada.email)
+```
+
+`TestClient` dispatches **in process**: routing, middleware, request decoding
+and JSON encoding all run for real, but there is no socket and no port to
+collide with. These tests are fast because the network is absent, not because
+the framework is stubbed.
+
+`flightRoutes` is generated alongside the per-route factories and returns all
+of them, so nothing here names a route by position — add a route to the
+controller and this keeps working unchanged. The closure *is* the injection:
+it builds the controller per request, which is where the fake goes in.
+
+This is also the only tier with a response to inspect, which is why the
+error-to-status mapping is proved here and nowhere else:
+
+```swift
+#expect(await client.get("/users/not-a-uuid").status == .badRequest)
+#expect(await client.get("/users/\(UUID())").status == .notFound)
+```
+
+Decode into a small payload type rather than back into `User`. Entities are
+`Encodable` but deliberately not `Decodable` (Stage 2.3), and a payload type
+also states what this endpoint is *supposed* to return:
+
+```swift
+private struct UserPayload: Decodable {
+    let id: UUID
+    let name: String
+    let email: String
 }
 ```
 
-Freezing a container is where lifetime mistakes surface: a singleton that
-captured a request-scoped repository, or two modules both claiming a key.
-Testing a single layer skips the freeze, so it skips those. The demo carries
-a `BootstrapTests` suite that boots its real modules for exactly this reason.
+### Four sizes of test
+
+| | What runs | Reach for it when |
+|---|---|---|
+| Call the method | one handler, one fake | most of the time |
+| `TestClient` + `flightRoutes` | real routing, middleware, decoding, encoding, error mapping | proving the plumbing once, not once per handler |
+| A real database | the query itself | the SQL is the claim |
+| Compose the modules | every module the application builds | the wiring itself is the claim |
+
+**The third row is the honest one.** `UserRepository` is built on Hangar's
+`Repo`, which talks to a real connection; there is no seam underneath it to
+slot a fake into, and a fake that rendered no SQL would prove nothing about
+SQL. A test that a query renders and runs correctly needs a real database, the
+same way Hangar's own suite does. That is precisely why the seam is one layer
+up: everything above `UserRepositoryProtocol` is testable with no database, and
+the one type below it is the one that needs a throwaway server.
+
+**The fourth catches what the other three cannot**, because building the graph
+is where a composition mistake surfaces — a module initializer that throws on
+real configuration, or two modules providing the same type. A test that never
+composes cannot see either:
+
+```swift
+let configuration = Configuration(values: [
+    "app.name": "TestApp",
+    "datasource.primary.url": "postgres://localhost/unused",
+])
+let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
+// Building the graph *is* the assertion: every component is constructed here,
+// eagerly, so a component that cannot be built fails on this line.
+_ = try FlightGraph(
+    configuration: configuration, postgresDataSource: postgres.dataSource)
+_ = try Flight.assemble(
+    configuration: configuration, modules: [postgres, AppModule()])
+```
+
+Nothing dials Postgres in that test — building the module opens no connection —
+but every key it needs must exist, which is the point. The demo carries a
+`BootstrapTests` suite that does nothing else, for exactly this reason.
 
 The complete suite is in
-[`templates/basics`](templates/basics/Tests/AppTests/UserControllerTests.swift).
+[`templates/basics`](templates/basics/Tests/AppTests/UserControllerTests.swift),
+and the fake is in
+[`InMemoryUsers.swift`](templates/basics/Tests/AppTests/InMemoryUsers.swift).
 
 ### Checkpoint
 
 ```bash
-swift test        # 8 tests pass, no database required
+swift test        # 11 tests pass, no database required
 ```
 
 ## Where the service layer goes
 
-`Sources/App/Services/` is still empty, and `UserController` resolves the
+`Sources/App/Services/` is still empty, and `UserController` injects the
 repository directly. That is on purpose.
 
 A service exists to hold behaviour that belongs to neither neighbour — a
@@ -873,18 +985,30 @@ security:
 
 Signature verification delegates to JWTKit. Flight owns orchestration only.
 
-For a tutorial that runs with no identity provider, the demo registers its
-own validator instead —
+For a tutorial that runs with no identity provider, the demo supplies its own
+validator instead —
 [`DemoTokenValidator`](templates/demo/Sources/App/Security/DemoTokenValidator.swift),
-which accepts `demo:ada:moderator` and does no cryptography at all. Register
-it **before** `FlightSecurityModule` and the module finds one present and
-stands down:
+which accepts `demo:ada:moderator` and does no cryptography at all. A module
+provides it as a value:
 
 ```swift
-container.register((any TokenValidator).self, scope: .singleton) { _ in
-    DemoTokenValidator()
+struct DemoAuthModule: FlightModule {
+    let tokenValidator: any TokenValidator = DemoTokenValidator()
 }
 ```
+
+`FlightSecurityModule` takes one — `init(validator:)` — and the composer
+matches that property to that parameter **by type**. So there is no ordering to
+get right and no "first registration wins" to reason about: a validator is
+either provided or the build says that nothing provides one. Listing
+`FlightOIDCModule` instead is the same mechanism with `security.oidc.*` behind
+it, which is what a real deployment does.
+
+It is its own module rather than a property on `AppModule`, and the reason is
+worth a sentence: `SocketController` injects the validator, which makes it a
+*root* of the component graph — and the graph is built before the modules that
+are built from it. A module that both takes the graph and provides one of its
+roots would be a cycle, and the build refuses that by name.
 
 That is the bring-your-own-auth seam, and the demo file exists to show it.
 **Delete it in anything real** and configure `security.oidc.*`. Rolling your
@@ -898,9 +1022,13 @@ Guarding a route is a line in the handler:
 try context.requireRole("moderator")
 ```
 
-401 with no principal, 403 with the wrong one. Listing `RequireAuthentication`
-in `container.pipeline { }` instead protects *every* route — right for an
-internal service, wrong for an app whose reads are public.
+401 with no principal, 403 with the wrong one. The alternative is a guard every
+route passes through, which protects *everything* — right for an internal
+service, wrong for an app whose reads are public. Middleware is values too:
+`FlightSecurityModule` puts `Authentication` on the default lane, so a
+principal is established for every request, and pairs it with
+`RequireAuthentication` on the lane that demands one. Establishing identity and
+insisting on it are two decisions, and the module keeps them separate.
 
 ## Stage 3.3 — A channel
 
@@ -909,7 +1037,9 @@ A `Channel` is per-topic server logic. Joining creates one instance per
 channels as a value:
 
 ```swift
-struct AppModule: FlightModule {
+struct DemoChannelsModule: FlightModule {
+    static var dependencies: [any FlightModule.Type] { [FlightChannelsModule.self] }
+
     let channels: [ChannelRegistration]
 
     init(graph: FlightGraph, presence: any Presence) {
@@ -934,8 +1064,16 @@ struct AppModule: FlightModule {
 
 The composition root collects `channels` from every module that declares any
 and hands them to `FlightChannelsModule`, which builds its router from them —
-so a malformed or duplicate pattern fails at startup, and a package outside
-your application can contribute channels without you listing them anywhere.
+so a malformed or duplicate pattern fails at composition rather than at a join,
+and a package outside your application can contribute channels without you
+listing them anywhere.
+
+Its own module again, and for the same reason as `DemoAuthModule`: the socket
+route injects the channels stack, which makes that a graph root, and a module
+that provides a root cannot also take the graph. Taking the graph is legal
+*here* precisely because the graph does not depend on Channels — what only a
+route terminal needs is passed to the terminals instead of stored on the graph.
+Without that split this module could not exist.
 
 The socket itself is a route, so it is declared like one, in
 [`SocketController.swift`](templates/demo/Sources/App/Controllers/SocketController.swift):
@@ -943,7 +1081,12 @@ The socket itself is a route, so it is declared like one, in
 ```swift
 @Controller
 struct SocketController {
+    // The marker says the scanner is right not to have found these: both are
+    // provided by a module rather than scanned from an annotation here.
+    // flight:hand-registered
     @Inject var validator: any TokenValidator
+    // flight:hand-registered
+    @Inject var sockets: ChannelSockets
 
     @WebSocketRoute("/socket")
     func socket(_ context: RequestContext) async throws -> ChannelSocketHandler {
@@ -951,7 +1094,7 @@ struct SocketController {
         if let token = context.request.queryParam("token") {
             principal = try? await validator.validate(token)
         }
-        return try ChannelSocketHandler(context: context, principal: principal)
+        return sockets.handler(principal: principal)
     }
 }
 ```
@@ -962,12 +1105,18 @@ arrives as a query parameter because browsers cannot set headers on a
 WebSocket handshake. An anonymous socket is admitted deliberately, and every
 `join` below then rejects it.
 
-`container.registerChannelSocket("/socket")` does the same wiring in one
-line, and is what a test harness or a quick spike wants. Prefer the declared
-form in an application: a route registered from a module body is arbitrary
-Swift, so nothing can enumerate it at build time — it does not appear in the
-static route manifest, and the dependency it needs arrives through
-`context.resolve` rather than through the type.
+**The channels stack arrives as one injected value**, rather than being
+assembled per upgrade. It used to be built from the request context, which
+meant looking up the router, the bus and the channels configuration on every
+upgrade — three lookups, on every connection, of things the composition root
+has held since start-up.
+
+A module could build the same route by hand, as a `RouteRegistration` value
+handed to `FlightWebModule`, and it would work. Prefer the declared form in an
+application: a value assembled at run time cannot be enumerated at compile
+time, so a socket wired that way is absent from the static route manifest the
+build emits. `@WebSocketRoute` keeps it on the map, and its dependencies are
+visible in the type rather than discovered when the closure runs.
 
 The channel itself, abridged from
 [`RoomChannel.swift`](templates/demo/Sources/App/Channels/RoomChannel.swift):
@@ -1069,16 +1218,16 @@ message, and a `DISTINCT ON` across every room. Both are expensive, both are
 polled by dashboards, and both tolerate being a few seconds stale.
 
 ```swift
-@Service(scope: .singleton)
+@Service
 struct RoomDigestService {
     @Inject var chat: ChatRepository
 
-    @Cacheable(namespace: "room-digest", ttl: .seconds(30))
+    @Cacheable(namespace: "room_digest", ttl: .seconds(30))
     func activity(minimumMessages: Int) async throws -> [RoomActivity] {
         try await chat.activity(minimumMessages: minimumMessages)
     }
 
-    @CacheEvict(namespace: "room-digest", allEntries: true)
+    @CacheEvict(namespace: "room_digest", allEntries: true)
     func messagesChanged() async {}
 }
 ```
@@ -1134,24 +1283,36 @@ like anything else, and its jobs are ordinary methods — so testing one needs
 no scheduler, no clock and no database, exactly like testing a service:
 
 ```swift
-private func jobs(rooms: [RoomActivity]) throws -> ChatJobs {
-    let container = try TestContainer.build {
-        Components(ChatJobs.self)
-        FakeDigests(rooms: rooms)
+private struct StubDigests: DigestReading {
+    let rooms: [RoomActivity]
+
+    func activity(minimumMessages: Int) async throws -> [RoomActivity] {
+        rooms.filter { $0.messages >= minimumMessages }
     }
-    return try container.resolve(ChatJobs.self)
+    func headlines() async throws -> [RoomHeadline] { [] }
 }
 
-@Test func summaryCountsBusyRooms() async throws {
-    try await jobs(rooms: [...]).nightlySummary()
+@Test("the nightly summary runs against the busy rooms")
+func summaryCountsBusyRooms() async throws {
+    let jobs = ChatJobs(digests: StubDigests(rooms: [
+        RoomActivity(room: "general", messages: 42, lastSentAt: Date()),
+        RoomActivity(room: "quiet", messages: 1, lastSentAt: nil),
+    ]))
+
+    try await jobs.nightlySummary()
 }
 ```
 
-Resolved from a container rather than constructed directly, and that is not
-incidental: a macro that generates an initializer replaces the memberwise one,
-so `ChatJobs(digests:)` does not exist. Every component in this app is built
-the same way for the same reason — see `ChatJobsTests`, which is the code
-above in full.
+Constructed directly, and that is the whole point. `@Scheduler` — like
+`@Controller` and `@Service` — generates an initializer over the injected
+properties, so `ChatJobs(digests:)` is exactly what the composition root calls
+when it builds this component from the graph, and exactly what the test calls
+with a stub in place of the real service. Every component in this app is built
+the same way for the same reason; see `ChatJobsTests`, which is the code above
+in full.
+
+Whether the job fires at 03:00 is the cron engine's business, and is tested
+there rather than here.
 
 Note that `ChatJobs` injects `(any DigestReading)` rather than
 `RoomDigestService`. The concrete service carries a live cache and a repository
@@ -1205,15 +1366,30 @@ question, not a detail.
 
 ### Running once when there really are several servers
 
-`once` needs something for the servers to contend through. `AppModule`
-registers one — it is in the demo already, because a job that is only safe on
-one machine is not much of a demonstration:
+`once` needs something for the servers to contend through. `AppModule` provides
+one — it is in the demo already, because a job that is only safe on one machine
+is not much of a demonstration:
 
 ```swift
-container.register((any JobCoordinator).self, scope: .singleton) { c in
-    PostgresJobCoordinator(dataSource: try c.resolve(PostgresDataSource.self))
+struct AppModule: FlightModule {
+    let graph: FlightGraph
+    let jobCoordinator: any JobCoordinator
+
+    init(graph: FlightGraph) {
+        self.graph = graph
+        self.jobCoordinator = PostgresJobCoordinator(dataSource: graph.postgresDataSource)
+    }
 }
 ```
+
+A property, matched by type to what `FlightSchedulerModule` takes. Nothing
+looks it up, which means a deployment cannot half-have one: the coordinator is
+either provided or visibly absent.
+
+The graph arrives the same way. `AppModule` takes it because everything this
+application contributes is built from it — including the pool this coordinator
+needs, which the graph has already built and which nothing else has to go
+looking for.
 
 It claims a lease row keyed on the job and the *firing instant*, so exactly
 one server wins each firing — and two servers whose clocks differ by a second
@@ -1221,12 +1397,12 @@ still agree which firing they are contending for. On this single-process demo
 it changes nothing observable, which is rather the point: the code you write
 is the same either way.
 
-Comment it out and the scheduler tells you at startup:
+Delete that property and the scheduler tells you at startup:
 
 ```
 warning: 1 job(s) are set to run once per firing, and no distributed
-JobCoordinator is registered. That is correct on a single server. If you run
-more than one, every one of them will run these jobs — register a coordinator.
+JobCoordinator is present. That is correct on a single server. If you run
+more than one, every one of them will run these jobs — add a coordinator.
 ```
 
 That line is deliberate. The failure it describes is otherwise completely
@@ -1259,7 +1435,6 @@ static var dependencies: [any FlightModule.Type] {
     [
         PostgresDataModule<PrimaryDataSource>.self,
         FlightPubSubModule.self,
-        FlightChannelsModule.self,
         FlightPresenceModule.self,
         FlightCacheModule.self,
         FlightSchedulerModule.self,
@@ -1268,7 +1443,24 @@ static var dependencies: [any FlightModule.Type] {
 }
 ```
 
-One line each. The DAG orders them; you do not.
+One line each. The DAG orders them; you do not. `FlightChannelsModule` is not
+in that list because it is `DemoChannelsModule`'s dependency rather than this
+module's — the module that provides the channels is the one that must be built
+after Channels.
+
+`main` lists what the application includes, and the generated composer builds
+each of them in dependency order:
+
+```swift
+modules: [
+    FlightWebModule<FlightTransport>.self,
+    DemoAuthModule.self,
+    DemoChannelsModule.self,
+    AppModule.self,
+    ActuatorModule.self,
+],
+composedBy: flightComposeModules
+```
 
 One bridge is needed, and it is worth understanding rather than copying:
 
@@ -1308,7 +1500,7 @@ presence.
 ### Checkpoint
 
 ```bash
-swift test        # 31 tests, no database and no network required
+swift test        # 36 tests, no database and no network required
 ```
 
 That suite runs the real Channels router, the real PubSub fan-out, and the
