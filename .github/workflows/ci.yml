@@ -141,10 +141,32 @@ jobs:
       - name: Install python3 and curl
         run: apt-get update -qq && apt-get install -y -qq python3 curl
 
+      # Checked out as siblings so the generated projects can be built
+      # against the commit under review. This job used to check out only
+      # flight-cli, so everything it built resolved flight and flight-data
+      # from their published tags — including when a caller passed
+      # `flight_ref`, which it accepted and then ignored. A breaking change
+      # in flight passed this job every single time.
       - uses: actions/checkout@v4
+        with:
+          path: flight-cli
 
-      # The generated projects resolve flight and flight-data by URL. Both
-      # are public now, so the token only raises the anonymous rate limit.
+      - uses: actions/checkout@v4
+        with:
+          repository: Flight-Framework/flight
+          ref: ${{ inputs.flight_ref || 'main' }}
+          token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
+          path: flight
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Flight-Framework/flight-data
+          ref: ${{ inputs.flight_data_ref || 'main' }}
+          token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
+          path: flight-data
+
+      # flight and flight-data resolve their own dependencies by URL, so the
+      # token is a rate-limit courtesy rather than a requirement.
       - name: Configure git
         run: |
           if [ -n "${{ secrets.SWIFTFLIGHT_CI_TOKEN }}" ]; then
@@ -153,22 +175,28 @@ jobs:
           git config --global --add safe.directory '*'
 
       - name: Unit tests
+        working-directory: flight-cli
         run: swift test
 
       # The embedded copy of templates/ must match templates/ itself,
       # or `flight new` emits something CI never verified.
       - name: Embedded templates are current
+        working-directory: flight-cli
         run: ./CI/generate-embedded-templates.sh --check
 
       # Builds and tests what `flight new` actually emits — a different
       # artifact from the templates, because the CLI rewrites names and paths.
+      # Repoints the generated manifest at the checkouts above, so this proves
+      # the change under review, not the last release.
       - name: Generated projects build and test
+        working-directory: flight-cli
         run: ./CI/verify-generated-projects.sh
 
       # The migrate commands delegate to the project's own migrate executable,
       # so the only way to know the delegation works is to run it against a
       # real database.
       - name: Migrate commands work end to end
+        working-directory: flight-cli
         env:
           FLIGHT_TEST_DATABASE_URL: postgres://postgres:flight@postgres:5432/migrationcheck
         run: ./CI/verify-migrate.sh
@@ -177,6 +205,7 @@ jobs:
       # names in them resolve. Two dead commands sat in a checkpoint for weeks
       # because nothing executed them.
       - name: Tutorial checkpoints run
+        working-directory: flight-cli
         env:
           FLIGHT_TEST_DATABASE_URL: postgres://postgres:flight@postgres:5432/migrationcheck
         run: ./CI/verify-checkpoints.sh

@@ -7,11 +7,21 @@
 # manifest strings, import statements, and paths, and any of that can be
 # subtly wrong in a way the templates themselves would never reveal.
 #
-#   ./CI/verify-generated-projects.sh          # all tiers
+# Like verify-templates.sh, the generated project's URL dependencies are
+# repointed at the checkouts sitting beside this repository, so CI verifies the
+# commit under review rather than whatever tag is published. Without that, the
+# `cli` job resolved released tags while its caller passed a `flight_ref` it
+# then ignored — a breaking change in flight passed this job every time.
+#
+#   ./CI/verify-generated-projects.sh          # all tiers, against siblings
 #   ./CI/verify-generated-projects.sh basics   # one
+#   FLIGHT_LOCAL=0 ./CI/verify-generated-projects.sh   # against published tags
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
+here="$(pwd)"
+flight_root="$(cd .. && pwd)"
+use_local="${FLIGHT_LOCAL:-1}"
 
 swift build --product flight >/dev/null
 cli="$(swift build --product flight --show-bin-path)/flight"
@@ -27,6 +37,10 @@ for tier in "${tiers[@]}"; do
   echo "──────── $tier ────────"
   name="Generated${tier^}"
   "$cli" new "$name" --tier "$tier" --path "$scratch/$tier" >/dev/null
+
+  if [ "$use_local" = "1" ]; then
+    python3 "$here/CI/repoint-manifest.py" "$scratch/$tier/Package.swift" "$flight_root"
+  fi
 
   # The generated project must contain no trace of the template's own target
   # name as an identifier — only in prose.

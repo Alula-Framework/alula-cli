@@ -33,26 +33,9 @@ for tier in "${tiers[@]}"; do
   cp -R "$here/templates/$tier" "$work"
 
   if [ "$use_local" = "1" ]; then
-    # Rewrite `.package(url: ".../flight.git", from: "x")` to a path, keeping
-    # any `traits:` argument that followed the version.
-    python3 - "$work/Package.swift" "$flight_root" <<'PY'
-import re, sys, pathlib
-manifest, root = pathlib.Path(sys.argv[1]), sys.argv[2]
-text = manifest.read_text()
-
-def to_path(match):
-    repo, tail = match.group(1), match.group(2)
-    traits = re.search(r'(traits:\s*\[[^\]]*\])', tail)
-    args = f'path: "{root}/{repo}"'
-    if traits:
-        args += f", {traits.group(1)}"
-    return f".package({args})"
-
-text = re.sub(
-    r'\.package\(\s*url:\s*"https://github\.com/Flight-Framework/([a-z-]+)\.git"\s*,([^)]*)\)',
-    to_path, text)
-manifest.write_text(text)
-PY
+    # Point the copy's dependencies at the sibling checkouts. Shared with
+    # verify-generated-projects.sh, which needs exactly the same rewrite.
+    python3 "$here/CI/repoint-manifest.py" "$work/Package.swift" "$flight_root"
   fi
 
   if (cd "$work" && swift build 2>&1 | tail -3) && (cd "$work" && swift test 2>&1 | tail -3); then

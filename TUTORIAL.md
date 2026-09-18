@@ -73,7 +73,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/Flight-Framework/flight.git",
-                 from: "0.18.0", traits: ["Web"])
+                 from: "0.20.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
@@ -370,7 +370,7 @@ Note that `require` does **not** verify certificates; `verify-full` does.
 ```swift
 dependencies: [
     .package(url: "https://github.com/Flight-Framework/flight.git",
-             from: "0.18.0", traits: ["Web"]),
+             from: "0.20.0", traits: ["Web"]),
     .package(url: "https://github.com/Flight-Framework/flight-data.git",
              from: "0.6.0", traits: ["Postgres"]),
 ],

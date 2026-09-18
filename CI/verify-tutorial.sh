@@ -34,8 +34,15 @@ python3 - <<'PY'
 import re, pathlib, sys
 
 tutorial = pathlib.Path("TUTORIAL.md").read_text()
+# Skip `.build`: a locally-built template vendors every dependency's source
+# there, so the haystack would include all of flight and flight-data and this
+# check would pass on names no template mentions. CI checks out fresh and has
+# no `.build`, so leaving it in makes the check weaker here than in CI — the
+# worst direction for a check to differ.
 sources = "\n".join(
-    p.read_text() for p in pathlib.Path("templates").rglob("*.swift")
+    p.read_text()
+    for p in pathlib.Path("templates").rglob("*.swift")
+    if ".build" not in p.parts
 )
 
 # Only symbols the tutorial presents as ours, in swift code fences.
@@ -69,8 +76,14 @@ python3 - <<'PYCHECK'
 import re, pathlib, sys
 
 tutorial = pathlib.Path("TUTORIAL.md").read_text()
-haystack = "\n".join(p.read_text() for p in pathlib.Path("templates").rglob("*.swift"))
-haystack += "\n" + "\n".join(p.read_text() for p in pathlib.Path("templates").rglob("Package.swift"))
+def template_files(pattern):
+    return [
+        p for p in pathlib.Path("templates").rglob(pattern) if ".build" not in p.parts
+    ]
+
+# `.build` excluded — see the note in the previous check.
+haystack = "\n".join(p.read_text() for p in template_files("*.swift"))
+haystack += "\n" + "\n".join(p.read_text() for p in template_files("Package.swift"))
 
 # Swift and Foundation types a reader already has.
 stdlib = {
@@ -102,5 +115,65 @@ for tier in skeleton basics demo; do
   fi
 done
 [ $status -eq 0 ] && echo "  ✔ every part closes on a tier"
+
+echo "── removed APIs"
+# The checks above see what the tutorial *declares* and what it *constructs*.
+# Neither can see a plain call to something that no longer exists:
+# `container.register(…)` declares nothing, and its receiver is lowercase, so
+# the constructed-types regex — which looks for `Uppercase(` — never matches
+# it. That is how this tutorial taught `Container`, `TestContainer.build(`,
+# `container.register(…)` and `container.resolve(…)`, all removed in 0.16.0,
+# while this script reported it green.
+#
+# A spelling the framework has deleted is a tutorial that will not compile,
+# whatever else passes. Add to this list whenever something is removed.
+removed_grep='TestContainer|container\.register\(|container\.resolve\(|container\.pipeline\(|container\.assets\(|container\.uploads\(|container\.registerChannel|flightRegisterAll|@Inject\("|@Component\(scope:|@Service\(scope:|@Repository\(scope:|@Component\(qualifier:|Lifetime\.'
+if hits=$(grep -nE "$removed_grep" TUTORIAL.md); then
+  echo "  ✘ tutorial teaches APIs that no longer exist:"
+  echo "$hits" | sed 's/^/      /'
+  status=1
+else
+  echo "  ✔ no removed API is taught"
+fi
+
+echo "── dependency pins"
+# The tutorial tells a reader what to put in Package.swift. The templates are
+# built and tested by CI, so they are the version of that truth which cannot
+# rot silently — and the tutorial drifting away from them means a reader's
+# first Package.swift differs from the one that is actually verified.
+python3 - <<'PYPINS'
+import re, pathlib, sys
+
+PIN = re.compile(r'Flight-Framework/([a-z-]+)\.git"[^)]*?from:\s*"([0-9][0-9.]*)"', re.S)
+
+def pins(text):
+    found = {}
+    for repo, version in PIN.findall(text):
+        found.setdefault(repo, set()).add(version)
+    return found
+
+tutorial = pins(pathlib.Path("TUTORIAL.md").read_text())
+template = {}
+for manifest in pathlib.Path("templates").rglob("Package.swift"):
+    if ".build" in manifest.parts:
+        # A locally-built template vendors its dependencies' own manifests
+        # here; reading them reports flight-data's pin of flight as if a
+        # template had written it.
+        continue
+    for repo, versions in pins(manifest.read_text()).items():
+        template.setdefault(repo, set()).update(versions)
+
+bad = False
+for repo, versions in sorted(tutorial.items()):
+    expected = template.get(repo)
+    if expected is None:
+        print(f"  ✘ tutorial pins {repo}, which no template depends on")
+        bad = True
+    elif not versions <= expected:
+        print(f"  ✘ tutorial pins {repo} at {sorted(versions)}, templates use {sorted(expected)}")
+        bad = True
+sys.exit(1 if bad else 0)
+PYPINS
+if [ $? -eq 0 ]; then echo "  ✔ tutorial pins match the templates"; else status=1; fi
 
 exit $status
