@@ -17,9 +17,17 @@
 # each template cover the behaviour instead.
 #
 # Some checkpoints are interactive by design — Stage 1.3's is `swift run App`,
-# which serves until you press Ctrl-C. Those cannot "finish", so every block
-# runs under a timeout and a block still running when it expires counts as a
-# pass: a server that is up after the deadline is a server that started.
+# which serves until you press Ctrl-C. Those cannot "finish", so they run under
+# a timeout and a block still running when it expires counts as a pass: a
+# server that is up after the deadline is a server that started.
+#
+# That used to apply to *every* checkpoint, which meant nine of the ten could
+# hang forever and be reported green — `swift test` wedged, a migration
+# blocked on a lock, a curl waiting on a server that never bound. Only a block
+# that says it serves until interrupted gets that treatment now; for the rest,
+# a timeout is a failure. The marker is the `Ctrl-C` the checkpoint already
+# tells the reader about, which is why it lives in the block rather than in a
+# list maintained over here.
 #
 # Needs FLIGHT_TEST_DATABASE_URL for Part 2 onward. Skips those, loudly,
 # without it.
@@ -144,12 +152,26 @@ for f in "$scratch"/cp*.sh; do
     status=$?
   fi
 
+  # A checkpoint may only pass on a timeout if it says it is one that never
+  # finishes. Everything else finishing is the thing being tested.
+  if grep -qiE 'ctrl-c|until you (press|interrupt)' "$f"; then
+    interactive=1
+  else
+    interactive=0
+  fi
+
   case $status in
     0)   echo "  ✔ $name (Part $part, $tier)" ;;
     124|130)
-         # Timed out or interrupted: an interactive checkpoint that was still
-         # serving. That is the pass condition for those.
-         echo "  ✔ $name (Part $part, $tier) — still running at the deadline" ;;
+         if [ "$interactive" = 1 ]; then
+           # Still serving at the deadline, which is this checkpoint's whole
+           # claim.
+           echo "  ✔ $name (Part $part, $tier) — still running at the deadline"
+         else
+           echo "  ✘ $name (Part $part, $tier) — still running after ${limit}s, and this one is expected to finish"
+           tail -8 "$scratch/$name.log" | sed 's/^/      /'
+           failed=$((failed + 1))
+         fi ;;
     *)   echo "  ✘ $name (Part $part, $tier) — exited $status"
          tail -8 "$scratch/$name.log" | sed 's/^/      /'
          failed=$((failed + 1)) ;;

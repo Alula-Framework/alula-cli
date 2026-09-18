@@ -205,7 +205,7 @@ because most of that graph is checked when the plugin generates it.
 ### Checkpoint
 
 ```bash
-swift run App
+swift run App        # serves until you press Ctrl-C
 ```
 
 Starts and logs its bound address. `curl localhost:8080/actuator/health`
