@@ -117,9 +117,10 @@ struct Main {
             ],
             // Built by the plugin, in dependency order, from the list above:
             // `modules:` says which subsystems this application includes,
-            // and this is how they are constructed. Without it Flight
-            // instantiates each from its type, which is why a module would
-            // have to be constructible with no arguments.
+            // and this is how they are constructed: the build plugin writes a
+            // composer that builds them in dependency order, which is what
+            // lets a module take what it needs as initializer parameters.
+            // It is required — there is no path without it.
             composedBy: flightComposeModules
         )
     }
