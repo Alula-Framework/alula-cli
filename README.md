@@ -12,7 +12,14 @@ swift build -c release
 cp .build/release/flight ~/.local/bin/
 ```
 
-Requires Swift 6.3 or later.
+Requires Swift 6.3 or later. The CLI itself depends only on
+swift-argument-parser and builds anywhere Swift 6.3 does.
+
+The projects it *emits* are a separate question: they depend on `flight`, so
+building one on a Mac needs the **macOS 26 SDK (Xcode 26)**. That is a build
+requirement, not a deployment one — what you build still runs on macOS 15. See
+[flight's README](https://github.com/Flight-Framework/flight#requirements) for
+why. On Linux, Swift 6.3 is the only requirement.
 
 ## Create a project
 

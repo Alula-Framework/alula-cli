@@ -22,6 +22,9 @@ template is right and the tutorial has a bug.
 ## What you need
 
 - Swift 6.3 or later (`swift --version`)
+- On macOS: the macOS 26 SDK (Xcode 26). The project you generate depends on
+  `flight`, which needs it to compile — though what it produces still runs on
+  macOS 15. On Linux there is nothing extra.
 - Docker, from Part 2 onward, for Postgres
 - No prior Flight knowledge; some Swift concurrency will help in Part 3
 
