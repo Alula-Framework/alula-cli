@@ -24,14 +24,31 @@ on:
         description: "The flight-data commit to build the templates against."
         type: string
         default: main
+      caller:
+        description: >-
+          Which repository is calling, so two invocations inside one run get
+          two concurrency groups. See the note on `concurrency` below.
+        type: string
+        default: ""
   workflow_dispatch:
 
-# The literal prefix is load-bearing. `github.workflow` and `github.ref`
-# resolve to the *caller's* values inside a reusable workflow, so without it
-# this group is identical to the one flight's run already occupies when it
-# calls us, and cancel-in-progress means the called job is never scheduled.
+# Two things are load-bearing here.
+#
+# The literal prefix: `github.workflow` and `github.ref` resolve to the
+# *caller's* values inside a reusable workflow, so without it this group is
+# identical to the one flight's run already occupies when it calls us, and
+# cancel-in-progress means the called job is never scheduled.
+#
+# And `inputs.caller`, because the prefix alone was not enough. flight's CI
+# calls this workflow directly *and* calls flight-data's, which calls this
+# workflow again — two invocations inside one run, both evaluating the
+# caller's context to the same string, so they landed in the same group and
+# cancel-in-progress killed one of them. That is why every `Starter
+# templates` job in flight's CI has been `cancelled` for as far back as the
+# run history goes, while the copy nested under flight-data ran. A gate that
+# is never scheduled reports nothing and looks like it is working.
 concurrency:
-  group: flight-cli-${{ github.workflow }}-${{ github.ref }}
+  group: flight-cli-${{ inputs.caller }}-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
