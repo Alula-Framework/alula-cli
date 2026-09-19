@@ -73,7 +73,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/Flight-Framework/flight.git",
-                 from: "0.20.0", traits: ["Web"])
+                 from: "0.21.1", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
@@ -370,9 +370,9 @@ Note that `require` does **not** verify certificates; `verify-full` does.
 ```swift
 dependencies: [
     .package(url: "https://github.com/Flight-Framework/flight.git",
-             from: "0.20.0", traits: ["Web"]),
+             from: "0.21.1", traits: ["Web"]),
     .package(url: "https://github.com/Flight-Framework/flight-data.git",
-             from: "0.6.0", traits: ["Postgres"]),
+             from: "0.7.0", traits: ["Postgres"]),
 ],
 ```
 
@@ -849,8 +849,9 @@ the one type below it is the one that needs a throwaway server.
 
 **The fourth catches what the other three cannot**, because building the graph
 is where a composition mistake surfaces — a module initializer that throws on
-real configuration, or two modules providing the same type. A test that never
-composes cannot see either:
+real configuration, say. A test that never composes cannot see it. (Two
+modules providing one type is not in this category: the generator refuses it
+and the build fails, so no test ever gets the chance.)
 
 ```swift
 let configuration = Configuration(values: [
