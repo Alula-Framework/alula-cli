@@ -26,8 +26,12 @@ on:
         default: main
   workflow_dispatch:
 
+# The literal prefix is load-bearing. `github.workflow` and `github.ref`
+# resolve to the *caller's* values inside a reusable workflow, so without it
+# this group is identical to the one flight's run already occupies when it
+# calls us, and cancel-in-progress means the called job is never scheduled.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: flight-cli-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -63,6 +67,8 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
+          repository: Flight-Framework/flight-cli
+          ref: ${{ inputs.flight_ref != '' && 'main' || github.sha }}
           path: flight-cli
 
       - uses: actions/checkout@v4
@@ -113,6 +119,9 @@ jobs:
         run: apt-get update -qq && apt-get install -y -qq python3 curl
 
       - uses: actions/checkout@v4
+        with:
+          repository: Flight-Framework/flight-cli
+          ref: ${{ inputs.flight_ref != '' && 'main' || github.sha }}
 
       # Cheap, and it catches the failure that actually happened last time:
       # a tutorial telling you to create files that no longer exist.
@@ -149,6 +158,8 @@ jobs:
       # in flight passed this job every single time.
       - uses: actions/checkout@v4
         with:
+          repository: Flight-Framework/flight-cli
+          ref: ${{ inputs.flight_ref != '' && 'main' || github.sha }}
           path: flight-cli
 
       - uses: actions/checkout@v4
@@ -216,6 +227,9 @@ jobs:
     container: swift:6.3.3
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: Flight-Framework/flight-cli
+          ref: ${{ inputs.flight_ref != '' && 'main' || github.sha }}
 
       # Blocking, not advisory: this repository is clean, and the way to keep
       # it that way is to fail on the first violation rather than accumulate a
@@ -229,6 +243,9 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: Flight-Framework/flight-cli
+          ref: ${{ inputs.flight_ref != '' && 'main' || github.sha }}
 
       # swiftly rather than swift-actions/setup-swift: this package declares
       # swift-tools-version 6.3, and setup-swift only indexes up to 6.2.
