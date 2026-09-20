@@ -22,10 +22,7 @@ struct UserController {
     }
 
     @GetRoute("/user/:id")
-    func getUser(_ context: RequestContext) async throws -> User {
-        guard let id = context.pathParam("id").flatMap({ UUID(uuidString: $0) }) else {
-            throw HTTPError(.badRequest, "user id must be a UUID")
-        }
+    func getUser(_ context: RequestContext, id: UUID) async throws -> User {
         guard let user = try await users.find(byID: id) else {
             throw HTTPError(.notFound, "no user \(id)")
         }

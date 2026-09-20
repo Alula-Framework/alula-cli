@@ -80,10 +80,7 @@ struct ChatController {
     ///
     /// Unloaded associations serialize as `null`; loaded ones as their value.
     @GetRoute("/rooms/:slug")
-    func room(_ context: RequestContext) async throws -> Room {
-        guard let slug = context.pathParam("slug") else {
-            throw HTTPError(.badRequest, "room slug is required")
-        }
+    func room(_ context: RequestContext, slug: String) async throws -> Room {
         guard let room = try await chat.room(slug: slug) else {
             throw HTTPError(.notFound, "no room '\(slug)'")
         }
@@ -93,8 +90,7 @@ struct ChatController {
     /// `GET /users/:id/history` — a user with everything they wrote.
     /// The association crosses a nullable foreign key.
     @GetRoute("/users/:id/history")
-    func history(_ context: RequestContext) async throws -> User {
-        let id = try context.uuidPathParam("id")
+    func history(_ context: RequestContext, id: UUID) async throws -> User {
         guard let user = try await chat.user(id: id) else {
             throw HTTPError(.notFound, "no user \(id)")
         }
@@ -113,9 +109,8 @@ struct ChatController {
     /// `GET /messages/:id/thread` — `messages` joined to itself under two
     /// aliases, so each reply arrives next to the message it answers.
     @GetRoute("/messages/:id/thread")
-    func thread(_ context: RequestContext) async throws -> [ThreadEntry] {
-        let id = try context.uuidPathParam("id")
-        return try await chat.thread(rootID: id)
+    func thread(_ context: RequestContext, id: UUID) async throws -> [ThreadEntry] {
+        try await chat.thread(rootID: id)
     }
 
     // MARK: Aggregates
@@ -171,10 +166,7 @@ struct ChatController {
     /// the real consumers are WebSocket clients, which get a
     /// `flight:presence_state` on join and `flight:presence_diff`s after.
     @GetRoute("/rooms/:slug/who")
-    func who(_ context: RequestContext) async throws -> Response {
-        guard let slug = context.pathParam("slug") else {
-            throw HTTPError(.badRequest, "room slug is required")
-        }
+    func who(_ context: RequestContext, slug: String) async throws -> Response {
         let entries = await presence.list(topic: "room:\(slug)")
         return try .json(
             entries.map { entry in
@@ -247,10 +239,7 @@ struct ChatController {
 
     /// `POST /topics/:label` — find-or-create without a read-then-write race.
     @PostRoute("/topics/:label")
-    func topic(_ context: RequestContext) async throws -> Topic {
-        guard let label = context.pathParam("label") else {
-            throw HTTPError(.badRequest, "topic label is required")
-        }
+    func topic(_ context: RequestContext, label: String) async throws -> Topic {
         return try await chat.topic(label: label)
     }
 
@@ -258,21 +247,14 @@ struct ChatController {
     /// topic on first use. Preloading `\.topics` afterwards reads it back
     /// through the join table.
     @PostRoute("/messages/:id/topics/:label")
-    func tag(_ context: RequestContext) async throws -> Topic {
-        let id = try context.uuidPathParam("id")
-        guard let label = context.pathParam("label") else {
-            throw HTTPError(.badRequest, "topic label is required")
-        }
-        return try await chat.tag(messageID: id, label: label)
+    func tag(_ context: RequestContext, id: UUID, label: String) async throws -> Topic {
+        try await chat.tag(messageID: id, label: label)
     }
 
     /// `POST /rooms/:slug/archive` — row lock inside a serializable
     /// transaction, retried on a serialization failure.
     @PostRoute("/rooms/:slug/archive")
-    func archive(_ context: RequestContext, body: ArchiveRoomRequest) async throws -> Response {
-        guard let slug = context.pathParam("slug") else {
-            throw HTTPError(.badRequest, "room slug is required")
-        }
+    func archive(_ context: RequestContext, slug: String, body: ArchiveRoomRequest) async throws -> Response {
         guard let source = try await chat.room(slug: slug, messageLimit: 0),
             let destination = try await chat.room(slug: body.destinationSlug, messageLimit: 0)
         else {
@@ -333,10 +315,7 @@ struct ChatController {
     /// connection that outlives the request scope, which is a different piece
     /// of plumbing than the one this endpoint is demonstrating.
     @GetRoute("/rooms/:slug/export")
-    func export(_ context: RequestContext) async throws -> Response {
-        guard let slug = context.pathParam("slug") else {
-            throw HTTPError(.badRequest, "room slug is required")
-        }
+    func export(_ context: RequestContext, slug: String) async throws -> Response {
         guard let room = try await chat.room(slug: slug, messageLimit: 0) else {
             throw HTTPError(.notFound, "no room '\(slug)'")
         }
@@ -348,16 +327,6 @@ struct ChatController {
         }
         context.logger.info("exported \(count) messages from \(slug)")
         return .text(lines.withLock { $0.joined(separator: "\n") })
-    }
-}
-
-extension RequestContext {
-    /// The one path-parameter shape this controller needs more than once.
-    fileprivate func uuidPathParam(_ name: String) throws -> UUID {
-        guard let value = pathParam(name).flatMap({ UUID(uuidString: $0) }) else {
-            throw HTTPError(.badRequest, "\(name) must be a UUID")
-        }
-        return value
     }
 }
 

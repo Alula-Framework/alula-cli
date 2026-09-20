@@ -35,7 +35,7 @@ struct UserControllerTests {
     @Test("getUser returns the mocked user")
     func getUser() async throws {
         let user = try await controller(MockUserRepository(users: [ada]))
-            .getUser(.mock(pathParameters: ["id": ada.id.uuidString]))
+            .getUser(.mock(), id: ada.id)
         #expect(user.id == ada.id)
         #expect(user.email == ada.email)
     }
@@ -43,19 +43,15 @@ struct UserControllerTests {
     /// The failure arrives as a thrown `HTTPError`, so its cause is assertable
     /// without HTTP. That it *becomes* a 404 on the wire is a separate claim,
     /// proved once end to end.
+    ///
+    /// There is no companion test for "the id is not a UUID": `id: UUID` is a
+    /// parameter, so a malformed one cannot reach this handler and cannot be
+    /// written into a call to it. The route refuses it first.
     @Test("getUser refuses an unknown id")
     func getUserUnknown() async {
         await #expect(throws: HTTPError.self) {
             _ = try await controller(MockUserRepository(users: [ada]))
-                .getUser(.mock(pathParameters: ["id": UUID().uuidString]))
-        }
-    }
-
-    @Test("getUser refuses an id that is not a UUID")
-    func getUserMalformed() async {
-        await #expect(throws: HTTPError.self) {
-            _ = try await controller(MockUserRepository(users: [ada]))
-                .getUser(.mock(pathParameters: ["id": "not-a-uuid"]))
+                .getUser(.mock(), id: UUID())
         }
     }
 

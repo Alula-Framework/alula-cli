@@ -18,15 +18,13 @@ struct HealthController {
         "\(appName) is flying"
     }
 
-    /// A path parameter, and the two lines of ceremony that come with one:
-    /// `pathParam` returns an optional because the route pattern and the
-    /// handler are separate things, and a mismatch should be a 400 rather
-    /// than a crash.
+    /// A path parameter, bound by name and already the right type. There is
+    /// no ceremony: the route pattern and the handler are checked against
+    /// each other when this compiles, so `:word` and `word:` cannot drift
+    /// apart, and a segment that does not parse is a 400 the handler never
+    /// has to write.
     @GetRoute("/echo/:word")
-    func echo(_ context: RequestContext) async throws -> String {
-        guard let word = context.pathParam("word") else {
-            throw HTTPError(.badRequest, "a word is required")
-        }
-        return "you said: \(word)"
+    func echo(_ context: RequestContext, word: String) async throws -> String {
+        "you said: \(word)"
     }
 }

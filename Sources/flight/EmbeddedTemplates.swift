@@ -1125,10 +1125,7 @@ struct ChatController {
     ///
     /// Unloaded associations serialize as `null`; loaded ones as their value.
     @GetRoute("/rooms/:slug")
-    func room(_ context: RequestContext) async throws -> Room {
-        guard let slug = context.pathParam("slug") else {
-            throw HTTPError(.badRequest, "room slug is required")
-        }
+    func room(_ context: RequestContext, slug: String) async throws -> Room {
         guard let room = try await chat.room(slug: slug) else {
             throw HTTPError(.notFound, "no room '\(slug)'")
         }
@@ -1138,8 +1135,7 @@ struct ChatController {
     /// `GET /users/:id/history` — a user with everything they wrote.
     /// The association crosses a nullable foreign key.
     @GetRoute("/users/:id/history")
-    func history(_ context: RequestContext) async throws -> User {
-        let id = try context.uuidPathParam("id")
+    func history(_ context: RequestContext, id: UUID) async throws -> User {
         guard let user = try await chat.user(id: id) else {
             throw HTTPError(.notFound, "no user \(id)")
         }
@@ -1158,9 +1154,8 @@ struct ChatController {
     /// `GET /messages/:id/thread` — `messages` joined to itself under two
     /// aliases, so each reply arrives next to the message it answers.
     @GetRoute("/messages/:id/thread")
-    func thread(_ context: RequestContext) async throws -> [ThreadEntry] {
-        let id = try context.uuidPathParam("id")
-        return try await chat.thread(rootID: id)
+    func thread(_ context: RequestContext, id: UUID) async throws -> [ThreadEntry] {
+        try await chat.thread(rootID: id)
     }
 
     // MARK: Aggregates
@@ -1216,10 +1211,7 @@ struct ChatController {
     /// the real consumers are WebSocket clients, which get a
     /// `flight:presence_state` on join and `flight:presence_diff`s after.
     @GetRoute("/rooms/:slug/who")
-    func who(_ context: RequestContext) async throws -> Response {
-        guard let slug = context.pathParam("slug") else {
-            throw HTTPError(.badRequest, "room slug is required")
-        }
+    func who(_ context: RequestContext, slug: String) async throws -> Response {
         let entries = await presence.list(topic: "room:\(slug)")
         return try .json(
             entries.map { entry in
@@ -1292,10 +1284,7 @@ struct ChatController {
 
     /// `POST /topics/:label` — find-or-create without a read-then-write race.
     @PostRoute("/topics/:label")
-    func topic(_ context: RequestContext) async throws -> Topic {
-        guard let label = context.pathParam("label") else {
-            throw HTTPError(.badRequest, "topic label is required")
-        }
+    func topic(_ context: RequestContext, label: String) async throws -> Topic {
         return try await chat.topic(label: label)
     }
 
@@ -1303,21 +1292,14 @@ struct ChatController {
     /// topic on first use. Preloading `\.topics` afterwards reads it back
     /// through the join table.
     @PostRoute("/messages/:id/topics/:label")
-    func tag(_ context: RequestContext) async throws -> Topic {
-        let id = try context.uuidPathParam("id")
-        guard let label = context.pathParam("label") else {
-            throw HTTPError(.badRequest, "topic label is required")
-        }
-        return try await chat.tag(messageID: id, label: label)
+    func tag(_ context: RequestContext, id: UUID, label: String) async throws -> Topic {
+        try await chat.tag(messageID: id, label: label)
     }
 
     /// `POST /rooms/:slug/archive` — row lock inside a serializable
     /// transaction, retried on a serialization failure.
     @PostRoute("/rooms/:slug/archive")
-    func archive(_ context: RequestContext, body: ArchiveRoomRequest) async throws -> Response {
-        guard let slug = context.pathParam("slug") else {
-            throw HTTPError(.badRequest, "room slug is required")
-        }
+    func archive(_ context: RequestContext, slug: String, body: ArchiveRoomRequest) async throws -> Response {
         guard let source = try await chat.room(slug: slug, messageLimit: 0),
             let destination = try await chat.room(slug: body.destinationSlug, messageLimit: 0)
         else {
@@ -1378,10 +1360,7 @@ struct ChatController {
     /// connection that outlives the request scope, which is a different piece
     /// of plumbing than the one this endpoint is demonstrating.
     @GetRoute("/rooms/:slug/export")
-    func export(_ context: RequestContext) async throws -> Response {
-        guard let slug = context.pathParam("slug") else {
-            throw HTTPError(.badRequest, "room slug is required")
-        }
+    func export(_ context: RequestContext, slug: String) async throws -> Response {
         guard let room = try await chat.room(slug: slug, messageLimit: 0) else {
             throw HTTPError(.notFound, "no room '\(slug)'")
         }
@@ -1393,16 +1372,6 @@ struct ChatController {
         }
         context.logger.info("exported \(count) messages from \(slug)")
         return .text(lines.withLock { $0.joined(separator: "\n") })
-    }
-}
-
-extension RequestContext {
-    /// The one path-parameter shape this controller needs more than once.
-    fileprivate func uuidPathParam(_ name: String) throws -> UUID {
-        guard let value = pathParam(name).flatMap({ UUID(uuidString: $0) }) else {
-            throw HTTPError(.badRequest, "\(name) must be a UUID")
-        }
-        return value
     }
 }
 
@@ -1453,16 +1422,14 @@ struct HealthController {
         "\(appName) is flying"
     }
 
-    /// A path parameter, and the two lines of ceremony that come with one:
-    /// `pathParam` returns an optional because the route pattern and the
-    /// handler are separate things, and a mismatch should be a 400 rather
-    /// than a crash.
+    /// A path parameter, bound by name and already the right type. There is
+    /// no ceremony: the route pattern and the handler are checked against
+    /// each other when this compiles, so `:word` and `word:` cannot drift
+    /// apart, and a segment that does not parse is a 400 the handler never
+    /// has to write.
     @GetRoute("/echo/:word")
-    func echo(_ context: RequestContext) async throws -> String {
-        guard let word = context.pathParam("word") else {
-            throw HTTPError(.badRequest, "a word is required")
-        }
-        return "you said: \(word)"
+    func echo(_ context: RequestContext, word: String) async throws -> String {
+        "you said: \(word)"
     }
 }
 
@@ -1548,10 +1515,7 @@ struct UserController {
     }
 
     @GetRoute("/user/:id")
-    func getUser(_ context: RequestContext) async throws -> User {
-        guard let id = context.pathParam("id").flatMap({ UUID(uuidString: $0) }) else {
-            throw HTTPError(.badRequest, "user id must be a UUID")
-        }
+    func getUser(_ context: RequestContext, id: UUID) async throws -> User {
         guard let user = try await users.find(byID: id) else {
             throw HTTPError(.notFound, "no user \(id)")
         }
@@ -3827,7 +3791,7 @@ struct UserControllerTests {
     @Test("getUser returns the mocked user")
     func getUser() async throws {
         let user = try await controller(MockUserRepository(users: [ada]))
-            .getUser(.mock(pathParameters: ["id": ada.id.uuidString]))
+            .getUser(.mock(), id: ada.id)
         #expect(user.id == ada.id)
         #expect(user.email == ada.email)
     }
@@ -3835,19 +3799,15 @@ struct UserControllerTests {
     /// The failure arrives as a thrown `HTTPError`, so its cause is assertable
     /// without HTTP. That it *becomes* a 404 on the wire is a separate claim,
     /// proved once end to end.
+    ///
+    /// There is no companion test for "the id is not a UUID": `id: UUID` is a
+    /// parameter, so a malformed one cannot reach this handler and cannot be
+    /// written into a call to it. The route refuses it first.
     @Test("getUser refuses an unknown id")
     func getUserUnknown() async {
         await #expect(throws: HTTPError.self) {
             _ = try await controller(MockUserRepository(users: [ada]))
-                .getUser(.mock(pathParameters: ["id": UUID().uuidString]))
-        }
-    }
-
-    @Test("getUser refuses an id that is not a UUID")
-    func getUserMalformed() async {
-        await #expect(throws: HTTPError.self) {
-            _ = try await controller(MockUserRepository(users: [ada]))
-                .getUser(.mock(pathParameters: ["id": "not-a-uuid"]))
+                .getUser(.mock(), id: UUID())
         }
     }
 
