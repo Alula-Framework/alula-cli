@@ -29,26 +29,26 @@ struct UserControllerTests {
     /// `get` returns a `User` — the domain value, not a `Response`. Encoding it
     /// to JSON is the framework's job at the boundary, so the unit test asserts
     /// on the value and leaves the wire format to the end-to-end tier.
+    /// The id arrives as a `UUID`, so calling the handler directly means
+    /// passing one — no mock path parameters, no string to spell right.
     @Test("fetching by id returns that user")
     func getByID() async throws {
-        let user = try await controller().get(.mock(pathParameters: ["id": ada.id.uuidString]))
+        let user = try await controller().get(.mock(), id: ada.id)
         #expect(user.email == ada.email)
     }
 
     /// Failures arrive as a thrown `HTTPError`, so the cause is assertable
-    /// without HTTP. That an error *becomes* a 400 or a 404 on the wire is a
-    /// separate claim, proved once in the end-to-end suite.
-    @Test("an id that is not a UUID is refused")
-    func malformedID() async {
-        await #expect(throws: HTTPError.self) {
-            _ = try await controller().get(.mock(pathParameters: ["id": "not-a-uuid"]))
-        }
-    }
-
+    /// without HTTP. That an error *becomes* a 404 on the wire is a separate
+    /// claim, proved once in the end-to-end suite.
+    ///
+    /// There is no unit test here for "the id is not a UUID", and that is
+    /// the point: the parameter's type makes it unrepresentable. A malformed
+    /// id is refused before this handler runs, which the end-to-end suite
+    /// asserts because that is the only level at which it can happen.
     @Test("an unknown id is refused")
     func unknownID() async {
         await #expect(throws: HTTPError.self) {
-            _ = try await controller().get(.mock(pathParameters: ["id": UUID().uuidString]))
+            _ = try await controller().get(.mock(), id: UUID())
         }
     }
 
@@ -137,6 +137,17 @@ struct UserRoutesEndToEndTests {
 
     /// The mapping the unit tests deliberately leave unproven: a thrown
     /// `HTTPError` becoming a status code on the wire.
+    /// The 400 the handler no longer has to write. `:id` is declared `UUID`,
+    /// so the framework refuses a malformed one at the edge and says which
+    /// parameter and which type — a check the handler used to open with.
+    @Test("an id that is not a UUID is refused at the edge, with a useful message")
+    func malformedIDIsRefused() async throws {
+        let response = await (try client()).get("/users/not-a-uuid")
+        #expect(response.status == .badRequest)
+        #expect(response.bodyText.contains("id"))
+        #expect(response.bodyText.contains("UUID"))
+    }
+
     @Test("a thrown HTTPError becomes the status the client sees")
     func errorsBecomeStatuses() async throws {
         #expect(await (try client()).get("/users/not-a-uuid").status == .badRequest)

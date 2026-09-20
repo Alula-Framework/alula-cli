@@ -658,10 +658,7 @@ struct UserController {
     }
 
     @GetRoute("/users/:id")
-    func get(_ context: RequestContext) async throws -> User {
-        guard let id = context.pathParam("id").flatMap({ UUID(uuidString: $0) }) else {
-            throw HTTPError(.badRequest, "user id must be a UUID")
-        }
+    func get(_ context: RequestContext, id: UUID) async throws -> User {
         guard let user = try await users.find(byID: id) else {
             throw HTTPError(.notFound, "no user \(id)")
         }
@@ -740,7 +737,7 @@ parameters, headers and a body when the handler needs them, nothing when it
 does not.
 
 ```swift
-let user = try await controller.get(.mock(pathParameters: ["id": ada.id.uuidString]))
+let user = try await controller.get(.mock(), id: ada.id)
 #expect(user.email == ada.email)
 ```
 
@@ -754,9 +751,15 @@ so proving *why* a request would 404 costs nothing:
 
 ```swift
 await #expect(throws: HTTPError.self) {
-    _ = try await controller.get(.mock(pathParameters: ["id": "not-a-uuid"]))
+    _ = try await controller.get(.mock(), id: UUID())
 }
 ```
+
+Notice which test is *missing* here: there is none for "the id was not a
+UUID". `id: UUID` is a parameter, so a malformed one cannot reach this
+handler and cannot be written into this test. That check belongs to the
+route, which refuses it before the handler runs — and the end-to-end tier
+asserts it there, because that is the only level at which it can happen.
 
 A fake is just a type that conforms. There is no mock framework and nothing
 generated:

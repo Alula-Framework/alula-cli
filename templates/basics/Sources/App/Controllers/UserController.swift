@@ -27,11 +27,17 @@ struct UserController {
         try await users.all()
     }
 
+    /// `id: UUID` binds the `:id` segment, already parsed.
+    ///
+    /// The handler never sees a string. A request for `/users/not-a-uuid` is
+    /// answered 400 before this body runs, naming the parameter and the type
+    /// it wanted — so the only failure left here is the one that is actually
+    /// about users: there is no such user.
+    ///
+    /// The macro checks the label against the path, so renaming one and not
+    /// the other is a build error rather than a 500 at runtime.
     @GetRoute("/users/:id")
-    func get(_ context: RequestContext) async throws -> User {
-        guard let id = context.pathParam("id").flatMap({ UUID(uuidString: $0) }) else {
-            throw HTTPError(.badRequest, "user id must be a UUID")
-        }
+    func get(_ context: RequestContext, id: UUID) async throws -> User {
         guard let user = try await users.find(byID: id) else {
             throw HTTPError(.notFound, "no user \(id)")
         }
