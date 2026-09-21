@@ -1490,6 +1490,35 @@ nobody reports.
 The test builds the real module with a recording store, so it proves the
 cookie round-trips and not only that the handler reads what it wrote.
 
+### Signing in with the cookie
+
+The same session carries an identity. `SessionController` checks a
+credential once — the demo's own validator, the same one the bearer path
+uses — and stores the resulting `Principal`:
+
+```swift
+@PostRoute("/")
+func signIn(_ context: RequestContext, body: SignIn) async throws -> Response {
+    let principal = try await validator.validate(body.token)
+    try context.requireSession().signIn(principal)
+    return .status(.noContent)
+}
+
+@GetRoute("/", pipelines: [.authenticated])
+func whoAmI(_ context: RequestContext) throws -> WhoAmI {
+    let principal = try context.requirePrincipal()          // from the cookie, not a header
+    return WhoAmI(subject: principal.subject, roles: principal.roles.sorted())
+}
+```
+
+From then on `Authentication` finds the principal in the session on every
+request that carries the cookie, and `requirePrincipal()`, `roles:` and the
+`.authenticated` lane behave exactly as they do for a bearer token. Nothing
+orders the two middlewares by hand: `FlightSecurityModule` is handed the
+session runtime in composition and runs `Sessions` ahead of
+`Authentication` in every lane it declares. `signIn` regenerates the session
+id, so an id handed out before signing in is never the one signed in.
+
 ### Checkpoint
 
 ```
@@ -1497,6 +1526,11 @@ $ curl -si -X POST localhost:8080/visits/lobby | grep -i set-cookie
 set-cookie: session=…; Path=/; Max-Age=1209600; HttpOnly; SameSite=Lax
 $ curl -s localhost:8080/visits/last -H 'Cookie: session=…'
 {"slug":"lobby"}
+$ curl -si -X POST localhost:8080/session -H 'content-type: application/json' \
+       -d '{"token":"demo:ada:admin"}' | grep -i set-cookie
+set-cookie: session=…                                    # a new id: signIn regenerated it
+$ curl -s localhost:8080/session -H 'Cookie: session=…'
+{"roles":["admin"],"subject":"ada"}
 ```
 
 ## Stage 3.9 — Wiring it together

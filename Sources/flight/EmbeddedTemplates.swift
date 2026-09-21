@@ -731,7 +731,7 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.23.0", traits: ["Security"]),
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.24.0", traits: ["Security"]),
         .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.7.0", traits: ["Postgres"]),
     ],
     targets: [
@@ -1431,6 +1431,75 @@ struct HealthController {
     @GetRoute("/echo/:word")
     func echo(_ context: RequestContext, word: String) async throws -> String {
         "you said: \(word)"
+    }
+}
+
+"""#,
+            "Sources/App/Controllers/SessionController.swift": #"""
+import FlightCore
+import FlightSecurityCore
+import FlightWeb
+
+/// Signing in with a cookie instead of a header.
+///
+/// Every other protected route in this demo reads `Authorization: Bearer
+/// demo:<subject>[:<roles>]` on each request, which is what an API client
+/// does. A browser does not: it presents a credential once and expects a
+/// cookie to remember the answer. This controller is that once — it runs
+/// the same `TokenValidator` the bearer path uses, stores the resulting
+/// `Principal` in the session, and from then on `Authentication` finds it
+/// there on every request that carries the cookie.
+///
+/// Try it:
+///
+///     curl -si -X POST localhost:8080/session -H 'content-type: application/json' \
+///          -d '{"token":"demo:ada:admin"}'                   # Set-Cookie: session=…
+///     curl -s localhost:8080/session -H 'Cookie: session=…'  # {"subject":"ada","roles":["admin"]}
+///     curl -si -X DELETE localhost:8080/session -H 'Cookie: session=…'
+@Controller("/session")
+struct SessionController {
+    /// The demo's validator, provided by `DemoAuthModule` as a value.
+    @Inject var validator: any TokenValidator
+
+    struct SignIn: Codable {
+        let token: String
+    }
+
+    struct WhoAmI: Codable, ResponseEncodable {
+        let subject: String
+        let roles: [String]
+    }
+
+    /// Checks the credential once and remembers who it was. The session id
+    /// changes here — `signIn` regenerates it — so an id handed out before
+    /// the sign-in is not the one that is signed in afterwards.
+    @PostRoute("/")
+    func signIn(_ context: RequestContext, body: SignIn) async throws -> Response {
+        let principal: Principal
+        do {
+            principal = try await validator.validate(body.token)
+        } catch {
+            // The reason stays in the log, as it does on the bearer path.
+            context.logger.info("sign-in refused", metadata: ["reason": "\(error)"])
+            throw HTTPError(.unauthorized, "Unauthorized")
+        }
+        try context.requireSession().signIn(principal)
+        return .status(.noContent)
+    }
+
+    /// Who the cookie says this is. `.authenticated`, so an anonymous browser
+    /// is refused before the handler — and the principal here came from the
+    /// session, not from a header.
+    @GetRoute("/", pipelines: [.authenticated])
+    func whoAmI(_ context: RequestContext) throws -> WhoAmI {
+        let principal = try context.requirePrincipal()
+        return WhoAmI(subject: principal.subject, roles: principal.roles.sorted())
+    }
+
+    @DeleteRoute("/")
+    func signOut(_ context: RequestContext) throws -> Response {
+        try context.requireSession().signOut()
+        return .status(.noContent)
     }
 }
 
@@ -3693,6 +3762,79 @@ struct RoomChannelTests {
 }
 
 """#,
+            "Tests/AppTests/SessionControllerTests.swift": #"""
+import FlightCore
+import FlightSecurityCore
+import FlightSessionsTesting
+import FlightWeb
+import FlightWebTesting
+import Foundation
+import HTTPTypes
+import Testing
+
+@testable import App
+
+/// The whole browser sign-in path, in process: the demo validator, the
+/// session middleware, and the security lanes composed the way `AppModule`
+/// composes them.
+@Suite("SessionController — cookie sign-in")
+struct SessionControllerTests {
+    private let store = RecordingSessionStore()
+
+    private func client() throws -> TestClient {
+        let validator: any TokenValidator = DemoTokenValidator()
+        let sessions = try FlightSessionsModule(
+            configuration: Configuration(values: ["sessions.cookie-secure": "false"]),
+            store: store)
+        let security = FlightSecurityModule(validator: validator, sessions: sessions.runtime)
+        return try TestClient(
+            routes: SessionController.flightRoutes { _ in SessionController(validator: validator) },
+            middleware: sessions.middleware + security.middleware)
+    }
+
+    private func sessionCookie(_ response: Response) -> String? {
+        response.headerValues("Set-Cookie")
+            .compactMap { $0.split(separator: ";").first.map(String.init) }
+            .first { $0.hasPrefix("session=") }
+    }
+
+    @Test("an anonymous browser is refused; a signed-in one is recognised by its cookie")
+    func signInRoundTrip() async throws {
+        let client = try client()
+        #expect(await client.get("/session/").status == .unauthorized)
+
+        let signIn = try await client.post("/session/", json: SessionController.SignIn(token: "demo:ada:admin,author"))
+        #expect(signIn.status == .noContent)
+        let cookie = try #require(sessionCookie(signIn))
+
+        let who = await client.get("/session/", headers: [.cookie: cookie])
+        #expect(who.status == .ok)
+        let identity = try who.decodeJSON(SessionController.WhoAmI.self)
+        #expect(identity.subject == "ada")
+        #expect(identity.roles == ["admin", "author"])
+    }
+
+    @Test("a bad credential is a 401 with nothing stored")
+    func refused() async throws {
+        let response = try await client().post("/session/", json: SessionController.SignIn(token: "not-a-demo-token"))
+        #expect(response.status == .unauthorized)
+        #expect(response.header("Set-Cookie") == nil)
+        #expect(store.entryCount == 0)
+    }
+
+    @Test("signing out regenerates the id and the old cookie no longer signs anyone in")
+    func signOut() async throws {
+        let client = try client()
+        let cookie = try #require(
+            sessionCookie(try await client.post("/session/", json: SessionController.SignIn(token: "demo:ada"))))
+        let out = await client.delete("/session/", headers: [.cookie: cookie])
+        #expect(out.status == .noContent)
+        #expect(sessionCookie(out) != cookie)
+        #expect(await client.get("/session/", headers: [.cookie: cookie]).status == .unauthorized)
+    }
+}
+
+"""#,
             "Tests/AppTests/Support/FakeRoomStore.swift": #"""
 import Foundation
 import Synchronization
@@ -4017,7 +4159,7 @@ struct VisitsControllerTests {
     }
 
     /// The `session=<id>` pair from a `Set-Cookie`, ready to send back.
-    private func cookie(_ response: Response) -> String? {
+    private func sessionCookie(_ response: Response) -> String? {
         response.headerValues("Set-Cookie")
             .compactMap { $0.split(separator: ";").first.map(String.init) }
             .first { $0.hasPrefix("session=") }
@@ -4037,7 +4179,7 @@ struct VisitsControllerTests {
         let client = try client()
         let visit = await client.post("/visits/lobby")
         #expect(visit.status == .ok)
-        let cookie = try #require(cookie(visit))
+        let cookie = try #require(sessionCookie(visit))
         #expect(store.entryCount == 1)
 
         let last = await client.get("/visits/last", headers: [.cookie: cookie])
@@ -4047,7 +4189,7 @@ struct VisitsControllerTests {
     @Test("forgetting deletes the session and expires the cookie")
     func forgets() async throws {
         let client = try client()
-        let cookie = try #require(cookie(await client.post("/visits/lobby")))
+        let cookie = try #require(sessionCookie(await client.post("/visits/lobby")))
 
         let forget = await client.delete("/visits/", headers: [.cookie: cookie])
         #expect(forget.status == .noContent)
