@@ -1433,7 +1433,73 @@ curl -sf --retry 30 --retry-connrefused --retry-delay 1 localhost:8080/actuator/
 kill %1
 ```
 
-## Stage 3.8 — Wiring it together
+## Stage 3.8 — A browser remembers
+
+Everything so far is either a bearer-token API or a socket. A browser has
+neither in hand when it first arrives; it has a cookie. Sessions are the
+state that belongs to *that browser* — where it left off, a notice for the
+next page, and later, once it has signed in, who it is.
+
+```swift
+@Controller("/visits")
+struct VisitsController {
+    struct LastVisit: Codable, ResponseEncodable { let slug: String? }
+
+    @GetRoute("/last")
+    func last(_ context: RequestContext) throws -> LastVisit {
+        LastVisit(slug: try context.requireSession().get("last-room", as: String.self))
+    }
+
+    @PostRoute("/:slug")
+    func visit(_ context: RequestContext, slug: String) throws -> LastVisit {
+        try context.requireSession().set("last-room", slug)
+        return LastVisit(slug: slug)
+    }
+
+    @DeleteRoute("/")
+    func forget(_ context: RequestContext) throws -> Response {
+        try context.requireSession().destroy()
+        return .status(.noContent)
+    }
+}
+```
+
+`FlightSessionsModule` goes in `dependencies`, and that is the wiring: a
+`Sessions` middleware in the default lane loads the session the cookie
+names, hands it to the handler as `context.session`, and persists whatever
+the handler did after it returns. `requireSession()` rather than unwrapping,
+because the failure names the module to list.
+
+Three things to notice, all visible with `curl -v`:
+
+- **`GET /visits/last` on a fresh browser sets no cookie and stores
+  nothing.** A session exists only once something is written, so crawlers
+  and health checks cannot fill the store.
+- **`POST /visits/lobby` answers with `Set-Cookie: session=…; HttpOnly;
+  SameSite=Lax`**, and the next request carrying it reads `lobby` back.
+  `Secure` is on by default — the cookie is a bearer credential — and off in
+  `flight-dev.yaml` only, because this demo serves plain HTTP.
+- **`DELETE /visits/` expires the cookie and deletes the record.**
+
+The store is a seam. It is in-memory here, which is right for one process,
+and `FlightSessionsValkeyModule` from flight-data makes it shared across
+replicas without touching a handler. A store that cannot answer is a 503
+rather than an empty session — a browser silently signed out is the failure
+nobody reports.
+
+The test builds the real module with a recording store, so it proves the
+cookie round-trips and not only that the handler reads what it wrote.
+
+### Checkpoint
+
+```
+$ curl -si -X POST localhost:8080/visits/lobby | grep -i set-cookie
+set-cookie: session=…; Path=/; Max-Age=1209600; HttpOnly; SameSite=Lax
+$ curl -s localhost:8080/visits/last -H 'Cookie: session=…'
+{"slug":"lobby"}
+```
+
+## Stage 3.9 — Wiring it together
 
 `AppModule` now names what the app is made of:
 
@@ -1446,6 +1512,7 @@ static var dependencies: [any FlightModule.Type] {
         FlightCacheModule.self,
         FlightSchedulerModule.self,
         FlightSecurityModule.self,
+        FlightSessionsModule.self,
     ]
 }
 ```

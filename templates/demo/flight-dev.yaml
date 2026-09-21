@@ -1,0 +1,9 @@
+# Loaded on top of flight.yaml when FLIGHT_ENV is `dev`, which is what an
+# unset FLIGHT_ENV means. Nothing in here belongs in production.
+
+sessions:
+  # The session cookie is `Secure` by default, because it is a bearer
+  # credential. This demo serves plain HTTP on 127.0.0.1, and Safari drops a
+  # Secure cookie from an http:// origin (Chrome and Firefox make an
+  # exception for localhost). Off here, and only here.
+  cookie-secure: false

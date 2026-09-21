@@ -731,7 +731,7 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.21.2", traits: ["Security"]),
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.23.0", traits: ["Security"]),
         .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.7.0", traits: ["Postgres"]),
     ],
     targets: [
@@ -782,6 +782,7 @@ let package = Package(
                 .product(name: "FlightCore", package: "flight"),
                 .product(name: "FlightWeb", package: "flight"),
                 .product(name: "FlightWebTesting", package: "flight"),
+                .product(name: "FlightSessionsTesting", package: "flight"),
                 .product(name: "FlightChannels", package: "flight"),
                 .product(name: "FlightChannelsTesting", package: "flight"),
                 .product(name: "FlightChannelsClient", package: "flight"),
@@ -1562,6 +1563,54 @@ struct UserController {
 }
 
 """#,
+            "Sources/App/Controllers/VisitsController.swift": #"""
+import FlightCore
+import FlightWeb
+
+/// The room a browser last opened, remembered in its session.
+///
+/// This is the demo's one use of sessions, and it is deliberately small:
+/// state that belongs to a *browser* rather than to a user — no login, no
+/// account, nothing the bearer-token routes know about. A client that opens
+/// a room tells the server so, and the next visit from the same browser can
+/// ask where it left off.
+///
+/// What it shows: `context.requireSession()` is the whole API surface a
+/// handler needs; nothing is stored, and no cookie is set, until the first
+/// write; and a `Codable` value goes in and comes out unchanged.
+@Controller("/visits")
+struct VisitsController {
+
+    /// The answer to "where did I leave off". `slug` is `nil` for a browser
+    /// that has never told us — a 200 with nothing in it, because "nowhere
+    /// yet" is an ordinary answer rather than an error.
+    struct LastVisit: Codable, ResponseEncodable {
+        let slug: String?
+    }
+
+    @GetRoute("/last")
+    func last(_ context: RequestContext) throws -> LastVisit {
+        LastVisit(slug: try context.requireSession().get("last-room", as: String.self))
+    }
+
+    /// Records a visit. Setting the same slug twice costs no store write —
+    /// the session notices the bytes did not change.
+    @PostRoute("/:slug")
+    func visit(_ context: RequestContext, slug: String) throws -> LastVisit {
+        try context.requireSession().set("last-room", slug)
+        return LastVisit(slug: slug)
+    }
+
+    /// Forgets everything this browser told us: the store entry is deleted
+    /// and the cookie expired.
+    @DeleteRoute("/")
+    func forget(_ context: RequestContext) throws -> Response {
+        try context.requireSession().destroy()
+        return .status(.noContent)
+    }
+}
+
+"""#,
             "Sources/App/Entities/Message.swift": #"""
 import Foundation
 import FlightDataPostgres
@@ -1808,6 +1857,11 @@ struct AppModule: FlightModule {
             // yourself, as this application does below. Order does not
             // matter, which is why this can simply be a dependency.
             FlightSecurityModule.self,
+            // Sessions: a cookie-keyed record per browser, loaded ahead of
+            // every request and persisted after it. In-memory here, which is
+            // right for one process; `FlightSessionsValkeyModule` from
+            // flight-data makes it shared when there are more.
+            FlightSessionsModule.self,
         ]
     }
 
@@ -3934,6 +3988,78 @@ struct UserServiceTests {
 }
 
 """#,
+            "Tests/AppTests/VisitsControllerTests.swift": #"""
+import FlightCore
+import FlightSessionsTesting
+import FlightWeb
+import FlightWebTesting
+import Foundation
+import HTTPTypes
+import Testing
+
+@testable import App
+
+/// The session middleware runs for real here — `FlightSessionsModule` built
+/// the way the composition root builds it, with a recording store in place
+/// of the in-memory one — so the suite proves the cookie round-trips, not
+/// only that the handler reads what it wrote.
+@Suite("VisitsController — through the session middleware")
+struct VisitsControllerTests {
+    private let store = RecordingSessionStore()
+
+    private func client() throws -> TestClient {
+        let sessions = try FlightSessionsModule(
+            configuration: Configuration(values: ["sessions.cookie-secure": "false"]),
+            store: store)
+        return try TestClient(
+            routes: VisitsController.flightRoutes { _ in VisitsController() },
+            middleware: sessions.middleware)
+    }
+
+    /// The `session=<id>` pair from a `Set-Cookie`, ready to send back.
+    private func cookie(_ response: Response) -> String? {
+        response.headerValues("Set-Cookie")
+            .compactMap { $0.split(separator: ";").first.map(String.init) }
+            .first { $0.hasPrefix("session=") }
+    }
+
+    @Test("a browser that has never visited gets an empty answer and no cookie")
+    func nothingYet() async throws {
+        let response = await (try client()).get("/visits/last")
+        #expect(response.status == .ok)
+        #expect(try response.decodeJSON(VisitsController.LastVisit.self).slug == nil)
+        #expect(response.header("Set-Cookie") == nil, "a read stores nothing")
+        #expect(store.entryCount == 0)
+    }
+
+    @Test("a visit sets the cookie, and the next request with it remembers")
+    func remembers() async throws {
+        let client = try client()
+        let visit = await client.post("/visits/lobby")
+        #expect(visit.status == .ok)
+        let cookie = try #require(cookie(visit))
+        #expect(store.entryCount == 1)
+
+        let last = await client.get("/visits/last", headers: [.cookie: cookie])
+        #expect(try last.decodeJSON(VisitsController.LastVisit.self).slug == "lobby")
+    }
+
+    @Test("forgetting deletes the session and expires the cookie")
+    func forgets() async throws {
+        let client = try client()
+        let cookie = try #require(cookie(await client.post("/visits/lobby")))
+
+        let forget = await client.delete("/visits/", headers: [.cookie: cookie])
+        #expect(forget.status == .noContent)
+        #expect(try #require(forget.header("Set-Cookie")).contains("Max-Age=0"))
+        #expect(store.entryCount == 0)
+
+        let last = await client.get("/visits/last", headers: [.cookie: cookie])
+        #expect(try last.decodeJSON(VisitsController.LastVisit.self).slug == nil)
+    }
+}
+
+"""#,
             "docker-compose.yml": #"""
 # The database this project expects, in one command:
 #
@@ -3990,6 +4116,18 @@ volumes:
 # transport, and the bootstrap test supplies a datasource URL that nothing dials.
 # That is the tier most tests belong in. A database is needed only for the
 # smaller tier that exercises real SQL.
+
+"""#,
+            "flight-dev.yaml": #"""
+# Loaded on top of flight.yaml when FLIGHT_ENV is `dev`, which is what an
+# unset FLIGHT_ENV means. Nothing in here belongs in production.
+
+sessions:
+  # The session cookie is `Secure` by default, because it is a bearer
+  # credential. This demo serves plain HTTP on 127.0.0.1, and Safari drops a
+  # Secure cookie from an http:// origin (Chrome and Firefox make an
+  # exception for localhost). Off here, and only here.
+  cookie-secure: false
 
 """#,
             "flight.yaml": #"""

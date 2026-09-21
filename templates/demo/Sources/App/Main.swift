@@ -50,6 +50,11 @@ struct AppModule: FlightModule {
             // yourself, as this application does below. Order does not
             // matter, which is why this can simply be a dependency.
             FlightSecurityModule.self,
+            // Sessions: a cookie-keyed record per browser, loaded ahead of
+            // every request and persisted after it. In-memory here, which is
+            // right for one process; `FlightSessionsValkeyModule` from
+            // flight-data makes it shared when there are more.
+            FlightSessionsModule.self,
         ]
     }
 
