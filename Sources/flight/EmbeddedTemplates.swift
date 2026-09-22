@@ -731,7 +731,7 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.29.1", traits: ["Security"]),
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.30.0", traits: ["Security"]),
         .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.9.0", traits: ["Postgres"]),
     ],
     targets: [
@@ -1452,25 +1452,27 @@ import FlightWeb
 /// `Principal` in the session, and from then on `Authentication` finds it
 /// there on every request that carries the cookie.
 ///
-/// `DELETE /` — signing out — is this demo's one `CSRFProtection`-guarded
-/// route: `"csrf"` names a lane `AppModule` fills with `CSRFProtection()`,
-/// and `whoAmI` hands out the token every signed-in caller already has to
-/// fetch to render a page at all. `POST /` — signing in — deliberately does
-/// not carry the same guard: an anonymous visitor has no session yet to have
-/// read a token from, and there is no server-rendered login page here to
-/// embed one in ahead of time. That is "login CSRF," a real if narrower
-/// attack (forcing a victim to authenticate as someone else, not to act as
-/// themselves), and defending it needs a page or a dedicated token endpoint
-/// this JSON-only demo does not have — see Docs/web.md in flight for the
-/// pattern once it does.
+/// Both halves are `CSRFProtection`-guarded: `"csrf"` names a lane
+/// `AppModule` fills with `CSRFProtection()`. Signing *out* is the obvious
+/// one. Signing *in* is the one people skip, and it is forgeable here: a
+/// `Codable` body also accepts `application/x-www-form-urlencoded`, which a
+/// plain HTML form on any site can submit with no preflight, and
+/// `SameSite=Lax` limits which cookies that POST *sends*, not which its
+/// response *sets*. Unguarded, a hostile page could sign a visitor into the
+/// attacker's account ("login CSRF"). So `GET /csrf` hands an anonymous
+/// browser a token first — which means it sets a cookie, the one cost of
+/// guarding a login — and the token survives signing in, because `signIn`
+/// regenerates the id and keeps the values.
 ///
 /// Try it:
 ///
+///     curl -si localhost:8080/session/csrf                   # Set-Cookie: session=…; {"csrfToken":"…"}
 ///     curl -si -X POST localhost:8080/session -H 'content-type: application/json' \
-///          -d '{"token":"demo:ada:admin"}'                   # Set-Cookie: session=…
-///     curl -s localhost:8080/session -H 'Cookie: session=…'  # {"subject":"ada","roles":[...],"csrfToken":"..."}
+///          -H 'Cookie: session=…' -H 'X-CSRF-Token: …' \
+///          -d '{"token":"demo:ada:admin"}'                   # Set-Cookie: session=… (a new id)
+///     curl -s localhost:8080/session -H 'Cookie: session=…'  # {"subject":"ada","roles":[...],"csrfToken":"…"}
 ///     curl -si -X DELETE localhost:8080/session \
-///          -H 'Cookie: session=…' -H 'X-CSRF-Token: …'       # the token whoAmI just answered with
+///          -H 'Cookie: session=…' -H 'X-CSRF-Token: …'       # the same token, still
 @Controller("/session")
 struct SessionController {
     /// The demo's validator, provided by `DemoAuthModule` as a value.
@@ -1478,6 +1480,12 @@ struct SessionController {
 
     struct SignIn: Codable {
         let token: String
+    }
+
+    /// What `GET /csrf` answers: the token a browser sends back on
+    /// `X-CSRF-Token` when it signs in.
+    struct CSRFToken: Codable, ResponseEncodable {
+        let csrfToken: String
     }
 
     struct WhoAmI: Codable, ResponseEncodable {
@@ -1490,10 +1498,19 @@ struct SessionController {
         let csrfToken: String
     }
 
+    /// The token an anonymous browser needs before it can sign in. Minting it
+    /// writes to the session, so this sets a cookie; nothing else anonymous
+    /// in the demo does.
+    @GetRoute("/csrf")
+    func csrf(_ context: RequestContext) throws -> CSRFToken {
+        CSRFToken(csrfToken: try context.requireSession().csrfToken())
+    }
+
     /// Checks the credential once and remembers who it was. The session id
     /// changes here — `signIn` regenerates it — so an id handed out before
-    /// the sign-in is not the one that is signed in afterwards.
-    @PostRoute("/")
+    /// the sign-in is not the one that is signed in afterwards. Needs
+    /// `X-CSRF-Token` from `GET /csrf`.
+    @PostRoute("/", pipelines: [.default, "csrf"])
     func signIn(_ context: RequestContext, body: SignIn) async throws -> Response {
         let principal: Principal
         do {
@@ -2031,18 +2048,16 @@ struct AppModule: FlightModule {
             + MiddlewareRegistration.lane(
                 "csrf",
                 [
-                    // `SessionController`'s sign-out is the only route naming
-                    // this lane (`pipelines: [.default, "csrf"]`): it is the
-                    // one place in this demo an ambient cookie alone could be
-                    // made to act, since signing in is what puts a principal
-                    // in the session in the first place. A lane of its own,
-                    // rather than folding `CSRFProtection` into `.default`,
-                    // keeps every bearer-token controller — which gets a
-                    // session too, since `Sessions` is unconditionally in
-                    // `.default`, but never a cookie carrying real authority
-                    // — from having to present a token it has no page to have
-                    // read one from. See `SessionController`'s own doc for
-                    // why sign-*in* is not guarded the same way.
+                    // `SessionController`'s sign-in and sign-out are the routes
+                    // naming this lane (`pipelines: [.default, "csrf"]`): the
+                    // two places in this demo an ambient cookie — or, for
+                    // sign-in, a forged form post setting one — could be made
+                    // to act. A lane of its own, rather than folding
+                    // `CSRFProtection` into `.default`, keeps every
+                    // bearer-token controller — which gets a session too,
+                    // since `Sessions` is unconditionally in `.default`, but
+                    // never a cookie carrying real authority — from having to
+                    // present a token it has no page to have read one from.
                     CSRFProtection()
                 ])
     }
@@ -3965,8 +3980,8 @@ import Testing
 @testable import App
 
 /// The whole browser sign-in path, in process: the demo validator, the
-/// session middleware, the security lanes, and the `"csrf"` lane sign-out
-/// names — composed the way `AppModule` composes them.
+/// session middleware, the security lanes, and the `"csrf"` lane sign-in and
+/// sign-out name — composed the way `AppModule` composes them.
 @Suite("SessionController — cookie sign-in")
 struct SessionControllerTests {
     private let store = RecordingSessionStore()
@@ -3990,38 +4005,84 @@ struct SessionControllerTests {
             .first { $0.hasPrefix("session=") }
     }
 
+    /// What a browser does before it can sign in: `GET /session/csrf`, which
+    /// sets the cookie the token is bound to.
+    private func csrf(_ client: TestClient) async throws -> (cookie: String, token: String) {
+        let response = await client.get("/session/csrf")
+        #expect(response.status == .ok)
+        let cookie = try #require(sessionCookie(response))
+        return (cookie, try response.decodeJSON(SessionController.CSRFToken.self).csrfToken)
+    }
+
+    /// Signs in the way a browser does, and returns the new cookie and the
+    /// token, which signing in keeps.
+    private func signIn(
+        _ client: TestClient, as credential: String
+    ) async throws -> (cookie: String, token: String) {
+        let (cookie, token) = try await csrf(client)
+        let response = try await client.post(
+            "/session/", headers: [.cookie: cookie, .xCSRFToken: token],
+            json: SessionController.SignIn(token: credential))
+        #expect(response.status == .noContent)
+        return (try #require(sessionCookie(response)), token)
+    }
+
     @Test("an anonymous browser is refused; a signed-in one is recognised by its cookie")
     func signInRoundTrip() async throws {
         let client = try client()
         #expect(await client.get("/session/").status == .unauthorized)
 
-        let signIn = try await client.post("/session/", json: SessionController.SignIn(token: "demo:ada:admin,author"))
-        #expect(signIn.status == .noContent)
-        let cookie = try #require(sessionCookie(signIn))
-
+        let (cookie, token) = try await signIn(client, as: "demo:ada:admin,author")
         let who = await client.get("/session/", headers: [.cookie: cookie])
         #expect(who.status == .ok)
         let identity = try who.decodeJSON(SessionController.WhoAmI.self)
         #expect(identity.subject == "ada")
         #expect(identity.roles == ["admin", "author"])
-        #expect(!identity.csrfToken.isEmpty)
+        // Minted anonymously, kept across the sign-in's id regeneration.
+        #expect(identity.csrfToken == token)
     }
 
-    @Test("a bad credential is a 401 with nothing stored")
+    @Test("a bad credential is a 401 and signs nobody in")
     func refused() async throws {
-        let response = try await client().post("/session/", json: SessionController.SignIn(token: "not-a-demo-token"))
+        let client = try client()
+        let (cookie, token) = try await csrf(client)
+        #expect(store.entryCount == 1, "minting the token is the one anonymous write")
+
+        let response = try await client.post(
+            "/session/", headers: [.cookie: cookie, .xCSRFToken: token],
+            json: SessionController.SignIn(token: "not-a-demo-token"))
         #expect(response.status == .unauthorized)
         #expect(response.header("Set-Cookie") == nil)
-        #expect(store.entryCount == 0)
+        #expect(await client.get("/session/", headers: [.cookie: cookie]).status == .unauthorized)
+    }
+
+    @Test("login CSRF: a sign-in without the token is refused, form-encoded or not")
+    func signInWithoutTokenRefused() async throws {
+        let client = try client()
+
+        // What a hostile page's auto-submitting form sends: form-encoded, no
+        // cookie of this site's at all, no token. A Codable body accepts form
+        // encoding, and a form needs no preflight — so without the guard this
+        // would sign the visitor in as the attacker.
+        let forged = await client.post(
+            "/session/", headers: [.contentType: "application/x-www-form-urlencoded"],
+            body: Data("token=demo:mallory".utf8))
+        #expect(forged.status == .forbidden)
+        #expect(sessionCookie(forged) == nil)
+
+        // The same with a real session cookie but no token.
+        let (cookie, _) = try await csrf(client)
+        let noToken = try await client.post(
+            "/session/", headers: [.cookie: cookie],
+            json: SessionController.SignIn(token: "demo:mallory"))
+        #expect(noToken.status == .forbidden)
+        #expect(await client.get("/session/", headers: [.cookie: cookie]).status == .unauthorized)
     }
 
     @Test("signing out regenerates the id and the old cookie no longer signs anyone in")
     func signOut() async throws {
         let client = try client()
-        let cookie = try #require(
-            sessionCookie(try await client.post("/session/", json: SessionController.SignIn(token: "demo:ada"))))
-        let token = try (await client.get("/session/", headers: [.cookie: cookie]))
-            .decodeJSON(SessionController.WhoAmI.self).csrfToken
+        let (cookie, token) = try await signIn(client, as: "demo:ada")
 
         let out = await client.delete(
             "/session/", headers: [.cookie: cookie, .xCSRFToken: token])
@@ -4033,8 +4094,7 @@ struct SessionControllerTests {
     @Test("signing out with no CSRF token, or the wrong one, is refused — the cookie still signs in")
     func signOutWithoutTokenRefused() async throws {
         let client = try client()
-        let cookie = try #require(
-            sessionCookie(try await client.post("/session/", json: SessionController.SignIn(token: "demo:ada"))))
+        let (cookie, _) = try await signIn(client, as: "demo:ada")
 
         #expect(await client.delete("/session/", headers: [.cookie: cookie]).status == .forbidden)
         #expect(

@@ -131,18 +131,16 @@ struct AppModule: FlightModule {
             + MiddlewareRegistration.lane(
                 "csrf",
                 [
-                    // `SessionController`'s sign-out is the only route naming
-                    // this lane (`pipelines: [.default, "csrf"]`): it is the
-                    // one place in this demo an ambient cookie alone could be
-                    // made to act, since signing in is what puts a principal
-                    // in the session in the first place. A lane of its own,
-                    // rather than folding `CSRFProtection` into `.default`,
-                    // keeps every bearer-token controller — which gets a
-                    // session too, since `Sessions` is unconditionally in
-                    // `.default`, but never a cookie carrying real authority
-                    // — from having to present a token it has no page to have
-                    // read one from. See `SessionController`'s own doc for
-                    // why sign-*in* is not guarded the same way.
+                    // `SessionController`'s sign-in and sign-out are the routes
+                    // naming this lane (`pipelines: [.default, "csrf"]`): the
+                    // two places in this demo an ambient cookie — or, for
+                    // sign-in, a forged form post setting one — could be made
+                    // to act. A lane of its own, rather than folding
+                    // `CSRFProtection` into `.default`, keeps every
+                    // bearer-token controller — which gets a session too,
+                    // since `Sessions` is unconditionally in `.default`, but
+                    // never a cookie carrying real authority — from having to
+                    // present a token it has no page to have read one from.
                     CSRFProtection()
                 ])
     }

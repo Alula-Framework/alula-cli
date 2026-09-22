@@ -1497,7 +1497,7 @@ credential once — the demo's own validator, the same one the bearer path
 uses — and stores the resulting `Principal`:
 
 ```swift
-@PostRoute("/")
+@PostRoute("/", pipelines: [.default, "csrf"])       // the lane is explained below
 func signIn(_ context: RequestContext, body: SignIn) async throws -> Response {
     let principal = try await validator.validate(body.token)
     try context.requireSession().signIn(principal)
@@ -1521,15 +1521,19 @@ session runtime in composition and runs `Sessions` ahead of
 `Authentication` in every lane it declares. `signIn` regenerates the session
 id, so an id handed out before signing in is never the one signed in.
 
-### Signing out, guarded
+### Guarding both ends
 
 A cookie is ambient: a browser attaches it to a request a page never asked
 the visitor to make. `CSRFProtection` is the middleware that refuses such a
 request without a token only the session itself could have handed out —
-`Session.csrfToken()` — and `signOut` is this demo's one route that needs
-it:
+`Session.csrfToken()`. Signing out needs it, and so does signing in:
 
 ```swift
+@GetRoute("/csrf")                                   // anonymous: mints the token
+func csrf(_ context: RequestContext) throws -> CSRFToken {
+    CSRFToken(csrfToken: try context.requireSession().csrfToken())
+}
+
 @DeleteRoute("/", pipelines: [.default, "csrf"])
 func signOut(_ context: RequestContext) throws -> Response {
     try context.requireSession().signOut()
@@ -1537,21 +1541,30 @@ func signOut(_ context: RequestContext) throws -> Response {
 }
 ```
 
+Sign-in is the one people leave open, and here it would be forgeable. A
+`Codable` body also accepts `application/x-www-form-urlencoded`, which a
+plain HTML form on any site can submit with no preflight, and
+`SameSite=Lax` limits which cookies that POST *sends*, not which its
+response *sets*. Unguarded, a hostile page could sign a visitor into the
+attacker's account — "login CSRF". So an anonymous browser first calls
+`GET /session/csrf`, which sets a cookie (minting a token is a session
+write, the one cost of guarding a login) and answers with the token. The
+token survives signing in, because `signIn` regenerates the id and keeps
+the values, so the same one works for signing out later; `whoAmI` repeats
+it for a client that has lost track.
+
 `"csrf"` is a lane `AppModule` fills with `CSRFProtection()`, appended to
 `.default` rather than folded into it — every other route in this app gets
 a session too, since `Sessions` sits unconditionally in `.default`, but
 none of the bearer-token ones has a *cookie* carrying real authority for
 CSRF to protect, and folding the check into `.default` would ask all of
-them for a token they have no page to have read one from. `whoAmI` is
-where the token comes from: any client about to offer a "sign out" button
-already called it to know there was one to show.
+them for a token they have no page to have read one from.
 
-Sign-*in* is deliberately not guarded the same way. An anonymous visitor
-has no session yet to have read a token out of, and this demo is JSON-only
-— there is no server-rendered login page to embed one in ahead of time.
-That gap has a name, "login CSRF," and a real application closes it with a
-page or a dedicated token endpoint; see `Docs/web.md` in flight for the
-pattern once there is one to hang it on.
+Every response also carries `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY` and a strict `Referrer-Policy` without anything
+here asking for them — `FlightWebModule` applies them after every lane.
+HSTS and a Content-Security-Policy are one `web.security-headers.*` key
+each, once a deployment serves HTTPS and knows what its pages load.
 
 ### Checkpoint
 
@@ -1560,16 +1573,23 @@ $ curl -si -X POST localhost:8080/visits/lobby | grep -i set-cookie
 set-cookie: session=…; Path=/; Max-Age=1209600; HttpOnly; SameSite=Lax
 $ curl -s localhost:8080/visits/last -H 'Cookie: session=…'
 {"slug":"lobby"}
+$ curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8080/session \
+       -H 'content-type: application/json' -d '{"token":"demo:ada:admin"}'
+403                                                        # no token: login CSRF refused
+$ curl -si localhost:8080/session/csrf
+set-cookie: session=…                                     # minting the token stores a session
+{"csrfToken":"…"}
 $ curl -si -X POST localhost:8080/session -H 'content-type: application/json' \
+       -H 'Cookie: session=…' -H 'X-CSRF-Token: …' \
        -d '{"token":"demo:ada:admin"}' | grep -i set-cookie
-set-cookie: session=…                                    # a new id: signIn regenerated it
+set-cookie: session=…                                     # a new id: signIn regenerated it
 $ curl -s localhost:8080/session -H 'Cookie: session=…'
-{"roles":["admin"],"subject":"ada","csrfToken":"…"}
-$ curl -s -o /dev/null -w '%{http_code}\n' -X DELETE localhost:8080/session -H 'Cookie: session=…'
-403                                                        # no X-CSRF-Token: refused, cookie and all
+{"roles":["admin"],"subject":"ada","csrfToken":"…"}       # the same token as before
 $ curl -si -X DELETE localhost:8080/session \
        -H 'Cookie: session=…' -H 'X-CSRF-Token: …' | grep -i set-cookie
 set-cookie: session=…                                     # signOut regenerated the id too
+$ curl -si localhost:8080/visits/last | grep -i x-frame-options
+x-frame-options: DENY
 ```
 
 ## Stage 3.9 — Wiring it together
