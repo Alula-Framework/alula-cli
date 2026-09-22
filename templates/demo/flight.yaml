@@ -42,3 +42,13 @@ flight:
 #     issuer: https://your-tenant.example.com/
 #     audience: flight-demo
 #     roles_claim: realm_access.roles
+#
+# Browser sign-in is the same story. This demo checks passwords itself
+# (FlightPasswordSignInModule over DemoAccountsModule); to sign in through
+# the same provider instead, list FlightOIDCSignInModule in Main.swift in
+# place of those two and add the client this application is to it:
+#
+#     client-id: flight-demo
+#     client-secret: "…"                 # omit for a public client
+#     redirect-uri: https://app.example.com/session/callback
+#     post-logout-redirect-uri: https://app.example.com/

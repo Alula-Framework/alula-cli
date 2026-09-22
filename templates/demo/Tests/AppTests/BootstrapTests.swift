@@ -60,6 +60,10 @@ struct BootstrapTests {
                 channels,
                 AppModule(graph: graph, limiter: RateLimiter(store: InMemoryRateLimitStore())),
                 FlightSecurityModule(validator: auth.tokenValidator),
+                try FlightPasswordSignInModule(
+                    configuration: configuration,
+                    store: DemoAccountsModule(configuration: configuration).credentialStore,
+                    limiter: RateLimiter(store: InMemoryRateLimitStore())),
                 ActuatorModule(),
                 presenceModule,
                 try FlightCacheModule(configuration: configuration),

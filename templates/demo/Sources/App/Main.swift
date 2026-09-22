@@ -168,6 +168,12 @@ struct Main {
             modules: [
                 FlightWebModule<FlightTransport>.self,  // choosing a transport = choosing a module
                 DemoAuthModule.self,
+                // Browser sign-in against the demo's own accounts. Swap for
+                // `FlightOIDCSignInModule.self` and add a `security.oidc`
+                // block to sign in through Keycloak or any OpenID Connect
+                // provider instead; SessionController does not change.
+                FlightPasswordSignInModule.self,
+                DemoAccountsModule.self,
                 DemoChannelsModule.self,
                 AppModule.self,
                 ActuatorModule.self,

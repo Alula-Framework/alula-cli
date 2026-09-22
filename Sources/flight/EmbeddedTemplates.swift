@@ -731,7 +731,7 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.30.0", traits: ["Security"]),
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.31.0", traits: ["Security"]),
         .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.9.0", traits: ["Postgres"]),
     ],
     targets: [
@@ -1442,45 +1442,46 @@ import FlightCore
 import FlightSecurityCore
 import FlightWeb
 
-/// Signing in with a cookie instead of a header.
+/// Signing in with a cookie instead of a header — written against
+/// `SignInProvider`, so it does not know who checks the password.
 ///
 /// Every other protected route in this demo reads `Authorization: Bearer
 /// demo:<subject>[:<roles>]` on each request, which is what an API client
-/// does. A browser does not: it presents a credential once and expects a
-/// cookie to remember the answer. This controller is that once — it runs
-/// the same `TokenValidator` the bearer path uses, stores the resulting
-/// `Principal` in the session, and from then on `Authentication` finds it
-/// there on every request that carries the cookie.
+/// does. A browser does not: it signs in once and expects a cookie to
+/// remember the answer. This controller is that once.
 ///
-/// Both halves are `CSRFProtection`-guarded: `"csrf"` names a lane
-/// `AppModule` fills with `CSRFProtection()`. Signing *out* is the obvious
-/// one. Signing *in* is the one people skip, and it is forgeable here: a
-/// `Codable` body also accepts `application/x-www-form-urlencoded`, which a
-/// plain HTML form on any site can submit with no preflight, and
-/// `SameSite=Lax` limits which cookies that POST *sends*, not which its
-/// response *sets*. Unguarded, a hostile page could sign a visitor into the
-/// attacker's account ("login CSRF"). So `GET /csrf` hands an anonymous
-/// browser a token first — which means it sets a cookie, the one cost of
-/// guarding a login — and the token survives signing in, because `signIn`
-/// regenerates the id and keeps the values.
+/// Today the provider is `FlightPasswordSignInModule`'s, over the accounts
+/// `DemoAccountsModule` holds. Swapping that one line in `Main.swift` for
+/// `FlightOIDCSignInModule.self`, plus a `security.oidc` block, moves this
+/// demo onto Keycloak or any OpenID Connect provider — and nothing below
+/// changes. `begin` answers with a form today and a redirect then; the
+/// callback route is already here for it.
+///
+/// Sign-in and sign-out are both on the `"csrf"` lane. Sign-in is the one
+/// people leave open, and it is forgeable: the password provider accepts a
+/// form-encoded body, which a plain HTML form on any site can submit with no
+/// preflight, and `SameSite=Lax` limits which cookies that POST *sends*, not
+/// which its response *sets* — so an unguarded page could sign a visitor
+/// into the attacker's account. `GET /csrf` hands an anonymous browser its
+/// token first, which means it sets a cookie; the token survives signing
+/// in, because `signIn` regenerates the id and keeps the values.
 ///
 /// Try it:
 ///
 ///     curl -si localhost:8080/session/csrf                   # Set-Cookie: session=…; {"csrfToken":"…"}
+///     curl -s localhost:8080/session/sign-in                 # {"fields":[{"name":"identifier",…},{"name":"password",…}]}
 ///     curl -si -X POST localhost:8080/session -H 'content-type: application/json' \
 ///          -H 'Cookie: session=…' -H 'X-CSRF-Token: …' \
-///          -d '{"token":"demo:ada:admin"}'                   # Set-Cookie: session=… (a new id)
-///     curl -s localhost:8080/session -H 'Cookie: session=…'  # {"subject":"ada","roles":[...],"csrfToken":"…"}
+///          -d '{"identifier":"ada@example.com","password":"correct horse"}'   # 204; Set-Cookie: a new id
+///     curl -s localhost:8080/session -H 'Cookie: session=…'  # {"subject":"…","email":"ada@example.com",…}
 ///     curl -si -X DELETE localhost:8080/session \
 ///          -H 'Cookie: session=…' -H 'X-CSRF-Token: …'       # the same token, still
 @Controller("/session")
 struct SessionController {
-    /// The demo's validator, provided by `DemoAuthModule` as a value.
-    @Inject var validator: any TokenValidator
-
-    struct SignIn: Codable {
-        let token: String
-    }
+    /// Whichever sign-in module is listed provides it.
+    // flight:hand-registered — a value FlightPasswordSignInModule (or
+    // FlightOIDCSignInModule) holds, not a scanned component.
+    @Inject var provider: any SignInProvider
 
     /// What `GET /csrf` answers: the token a browser sends back on
     /// `X-CSRF-Token` when it signs in.
@@ -1488,13 +1489,15 @@ struct SessionController {
         let csrfToken: String
     }
 
+    /// Who is signed in — the standard claims every provider emits, under
+    /// the same names whichever one produced them.
     struct WhoAmI: Codable, ResponseEncodable {
         let subject: String
+        let email: String?
+        let name: String?
         let roles: [String]
         /// What `DELETE /` needs on `X-CSRF-Token`. Reading it here costs
-        /// nothing extra: `whoAmI` already runs on an established,
-        /// already-persisted session — unlike an anonymous route, there is
-        /// no "a mere read now creates a store entry" cost to worry about.
+        /// nothing extra: `whoAmI` already runs on an established session.
         let csrfToken: String
     }
 
@@ -1506,41 +1509,47 @@ struct SessionController {
         CSRFToken(csrfToken: try context.requireSession().csrfToken())
     }
 
-    /// Checks the credential once and remembers who it was. The session id
-    /// changes here — `signIn` regenerates it — so an id handed out before
-    /// the sign-in is not the one that is signed in afterwards. Needs
-    /// `X-CSRF-Token` from `GET /csrf`.
+    /// What starting looks like: a form to show (password) or a redirect to
+    /// follow (an external provider). A front end that handles both needs no
+    /// change when the provider does.
+    @GetRoute("/sign-in")
+    func begin(_ context: RequestContext) async throws -> Response {
+        try await provider.beginSignIn(context, returnTo: context.request.queryParam("return-to"))
+            .response()
+    }
+
+    /// The password form posts here. `signIn` checks it and puts the
+    /// principal in the session, regenerating the session id — so an id
+    /// handed out before the sign-in is not the one signed in afterwards.
     @PostRoute("/", pipelines: [.default, "csrf"])
-    func signIn(_ context: RequestContext, body: SignIn) async throws -> Response {
-        let principal: Principal
-        do {
-            principal = try await validator.validate(body.token)
-        } catch {
-            // The reason stays in the log, as it does on the bearer path.
-            context.logger.info("sign-in refused", metadata: ["reason": "\(error)"])
-            throw HTTPError(.unauthorized, "Unauthorized")
-        }
-        try context.requireSession().signIn(principal)
-        return .status(.noContent)
+    func signIn(_ context: RequestContext) async throws -> Response {
+        try await provider.signIn(context).response()
+    }
+
+    /// Where an external provider sends the browser back. Unused while the
+    /// provider is the password one; present so switching is only the
+    /// module list. A GET, so CSRF-exempt — the provider's `state` is what
+    /// ties the callback to this browser's sign-in.
+    @GetRoute("/callback")
+    func callback(_ context: RequestContext) async throws -> Response {
+        try await provider.signIn(context).response()
     }
 
     /// Who the cookie says this is. `.authenticated`, so an anonymous browser
-    /// is refused before the handler — and the principal here came from the
-    /// session, not from a header.
+    /// is refused before the handler.
     @GetRoute("/", pipelines: [.authenticated])
     func whoAmI(_ context: RequestContext) throws -> WhoAmI {
         let principal = try context.requirePrincipal()
         return WhoAmI(
-            subject: principal.subject, roles: principal.roles.sorted(),
-            csrfToken: try context.requireSession().csrfToken())
+            subject: principal.subject, email: principal.email, name: principal.name,
+            roles: principal.roles.sorted(), csrfToken: try context.requireSession().csrfToken())
     }
 
-    /// Needs `X-CSRF-Token`, from the `whoAmI` this same browser already
-    /// called to render anything worth showing a "sign out" button on.
+    /// Signs out here, and at the provider too when it has a session of its
+    /// own to end — a redirect then, a 204 now.
     @DeleteRoute("/", pipelines: [.default, "csrf"])
-    func signOut(_ context: RequestContext) throws -> Response {
-        try context.requireSession().signOut()
-        return .status(.noContent)
+    func signOut(_ context: RequestContext) async throws -> Response {
+        try await provider.signOut(context).response()
     }
 }
 
@@ -2085,6 +2094,12 @@ struct Main {
             modules: [
                 FlightWebModule<FlightTransport>.self,  // choosing a transport = choosing a module
                 DemoAuthModule.self,
+                // Browser sign-in against the demo's own accounts. Swap for
+                // `FlightOIDCSignInModule.self` and add a `security.oidc`
+                // block to sign in through Keycloak or any OpenID Connect
+                // provider instead; SessionController does not change.
+                FlightPasswordSignInModule.self,
+                DemoAccountsModule.self,
                 DemoChannelsModule.self,
                 AppModule.self,
                 ActuatorModule.self,
@@ -2706,6 +2721,54 @@ protocol UserRepositoryProtocol: Sendable {
 }
 
 """#,
+            "Sources/App/Security/DemoAccounts.swift": #"""
+import FlightCore
+import FlightSecurityCore
+
+/// The accounts the demo's password sign-in checks against.
+///
+/// In memory, seeded at startup, so the demo runs with nothing to set up. A
+/// real application implements `CredentialStore` over its own users table —
+/// two methods, find by identifier and save a stronger hash — and provides
+/// that here instead; see Docs/sign-in.md in flight. Subjects are opaque ids,
+/// never the email address: when this application moves to an identity
+/// provider, the subject is what every row keyed by user survives on.
+///
+/// Its own module for the same reason `DemoAuthModule` is: `SessionController`
+/// injects the sign-in provider, which makes the provider — and so this store
+/// behind it — a root of the component graph, and `AppModule` takes the graph.
+struct DemoAccountsModule: FlightModule {
+    /// Matched by type to `FlightPasswordSignInModule`'s `store:`.
+    let credentialStore: any CredentialStore
+
+    init(configuration: Configuration) throws {
+        let store = InMemoryCredentialStore()
+        let hasher = Argon2idHashing()
+        store.insert(
+            StoredCredential(
+                subject: "1f0c2b1e-ada0-4c3e-9d8e-000000000001",
+                passwordHash: try hasher.hash("correct horse"),
+                roles: ["admin", "author"],
+                email: "ada@example.com", emailVerified: true, name: "Ada Lovelace",
+                preferredUsername: "ada"),
+            identifiers: ["ada@example.com", "ada"])
+        store.insert(
+            StoredCredential(
+                subject: "1f0c2b1e-ada0-4c3e-9d8e-000000000002",
+                passwordHash: try hasher.hash("battery staple"),
+                roles: ["author"],
+                email: "grace@example.com", emailVerified: true, name: "Grace Hopper",
+                preferredUsername: "grace"),
+            identifiers: ["grace@example.com", "grace"])
+        self.credentialStore = store
+    }
+
+    init() {
+        preconditionFailure("DemoAccountsModule is built by flightComposeModules.")
+    }
+}
+
+"""#,
             "Sources/App/Security/DemoTokenValidator.swift": #"""
 import FlightCore
 import FlightSecurityCore
@@ -3278,6 +3341,10 @@ struct BootstrapTests {
                 channels,
                 AppModule(graph: graph, limiter: RateLimiter(store: InMemoryRateLimitStore())),
                 FlightSecurityModule(validator: auth.tokenValidator),
+                try FlightPasswordSignInModule(
+                    configuration: configuration,
+                    store: DemoAccountsModule(configuration: configuration).credentialStore,
+                    limiter: RateLimiter(store: InMemoryRateLimitStore())),
                 ActuatorModule(),
                 presenceModule,
                 try FlightCacheModule(configuration: configuration),
@@ -3969,6 +4036,7 @@ struct RoomChannelTests {
 """#,
             "Tests/AppTests/SessionControllerTests.swift": #"""
 import FlightCore
+import FlightRateLimit
 import FlightSecurityCore
 import FlightSessionsTesting
 import FlightWeb
@@ -3979,24 +4047,45 @@ import Testing
 
 @testable import App
 
-/// The whole browser sign-in path, in process: the demo validator, the
-/// session middleware, the security lanes, and the `"csrf"` lane sign-in and
-/// sign-out name — composed the way `AppModule` composes them.
+/// The whole browser sign-in path, in process: the password provider over the
+/// demo's accounts, the session middleware, the security lanes, and the
+/// `"csrf"` lane sign-in and sign-out name — composed the way `AppModule`
+/// composes them.
 @Suite("SessionController — cookie sign-in")
 struct SessionControllerTests {
     private let store = RecordingSessionStore()
 
     private func client() throws -> TestClient {
-        let validator: any TokenValidator = DemoTokenValidator()
         let sessions = try FlightSessionsModule(
             configuration: Configuration(values: ["sessions.cookie-secure": "false"]),
             store: store)
-        let security = FlightSecurityModule(validator: validator, sessions: sessions.runtime)
+        // No bearer validator is needed for a browser; the demo's is for its
+        // APIs, and it is exercised elsewhere.
+        let security = FlightSecurityModule(validator: nil, sessions: sessions.runtime)
+        // The demo's accounts, and the password provider over them — hashed
+        // with cheap parameters so the suite stays fast.
+        let fast = Argon2idHashing(parameters: .init(timeCost: 1, memoryCost: 8, parallelism: 1))
+        let accounts = InMemoryCredentialStore()
+        accounts.insert(
+            StoredCredential(
+                subject: "user-ada", passwordHash: try fast.hash("correct horse"),
+                roles: ["admin", "author"], email: "ada@example.com", emailVerified: true,
+                name: "Ada Lovelace"),
+            identifiers: ["ada@example.com", "ada"])
+        let provider = PasswordSignIn(
+            authenticator: PasswordAuthenticator(
+                store: accounts, issuer: "local", hasher: fast,
+                limiter: RateLimiter(store: InMemoryRateLimitStore())))
         return try TestClient(
-            routes: SessionController.flightRoutes { _ in SessionController(validator: validator) },
+            routes: SessionController.flightRoutes { _ in SessionController(provider: provider) },
             middleware:
                 sessions.middleware + security.middleware
                 + MiddlewareRegistration.lane("csrf", [CSRFProtection()]))
+    }
+
+    private struct Credentials: Encodable {
+        let identifier: String
+        let password: String
     }
 
     private func sessionCookie(_ response: Response) -> String? {
@@ -4017,14 +4106,24 @@ struct SessionControllerTests {
     /// Signs in the way a browser does, and returns the new cookie and the
     /// token, which signing in keeps.
     private func signIn(
-        _ client: TestClient, as credential: String
+        _ client: TestClient, as identifier: String = "ada@example.com",
+        password: String = "correct horse"
     ) async throws -> (cookie: String, token: String) {
         let (cookie, token) = try await csrf(client)
         let response = try await client.post(
             "/session/", headers: [.cookie: cookie, .xCSRFToken: token],
-            json: SessionController.SignIn(token: credential))
+            json: Credentials(identifier: identifier, password: password))
         #expect(response.status == .noContent)
         return (try #require(sessionCookie(response)), token)
+    }
+
+    @Test("beginning describes the password form — the fields a front end draws")
+    func beginDescribesTheForm() async throws {
+        let response = await (try client()).get("/session/sign-in")
+        #expect(response.status == .ok)
+        let form = try response.decodeJSON(SignInForm.self)
+        #expect(form.fields.map(\.name) == ["identifier", "password"])
+        #expect(form.fields.last?.autocomplete == "current-password")
     }
 
     @Test("an anonymous browser is refused; a signed-in one is recognised by its cookie")
@@ -4032,17 +4131,19 @@ struct SessionControllerTests {
         let client = try client()
         #expect(await client.get("/session/").status == .unauthorized)
 
-        let (cookie, token) = try await signIn(client, as: "demo:ada:admin,author")
+        let (cookie, token) = try await signIn(client)
         let who = await client.get("/session/", headers: [.cookie: cookie])
         #expect(who.status == .ok)
         let identity = try who.decodeJSON(SessionController.WhoAmI.self)
-        #expect(identity.subject == "ada")
+        #expect(identity.subject == "user-ada")
+        #expect(identity.email == "ada@example.com")
+        #expect(identity.name == "Ada Lovelace")
         #expect(identity.roles == ["admin", "author"])
         // Minted anonymously, kept across the sign-in's id regeneration.
         #expect(identity.csrfToken == token)
     }
 
-    @Test("a bad credential is a 401 and signs nobody in")
+    @Test("a wrong password is a 401 and signs nobody in")
     func refused() async throws {
         let client = try client()
         let (cookie, token) = try await csrf(client)
@@ -4050,7 +4151,7 @@ struct SessionControllerTests {
 
         let response = try await client.post(
             "/session/", headers: [.cookie: cookie, .xCSRFToken: token],
-            json: SessionController.SignIn(token: "not-a-demo-token"))
+            json: Credentials(identifier: "ada@example.com", password: "wrong"))
         #expect(response.status == .unauthorized)
         #expect(response.header("Set-Cookie") == nil)
         #expect(await client.get("/session/", headers: [.cookie: cookie]).status == .unauthorized)
@@ -4061,12 +4162,12 @@ struct SessionControllerTests {
         let client = try client()
 
         // What a hostile page's auto-submitting form sends: form-encoded, no
-        // cookie of this site's at all, no token. A Codable body accepts form
-        // encoding, and a form needs no preflight — so without the guard this
-        // would sign the visitor in as the attacker.
+        // cookie of this site's at all, no token. The password provider
+        // accepts form encoding, and a form needs no preflight — so without
+        // the guard this would sign the visitor in as the attacker.
         let forged = await client.post(
             "/session/", headers: [.contentType: "application/x-www-form-urlencoded"],
-            body: Data("token=demo:mallory".utf8))
+            body: Data("identifier=mallory%40example.com&password=hunter2".utf8))
         #expect(forged.status == .forbidden)
         #expect(sessionCookie(forged) == nil)
 
@@ -4074,7 +4175,7 @@ struct SessionControllerTests {
         let (cookie, _) = try await csrf(client)
         let noToken = try await client.post(
             "/session/", headers: [.cookie: cookie],
-            json: SessionController.SignIn(token: "demo:mallory"))
+            json: Credentials(identifier: "ada@example.com", password: "correct horse"))
         #expect(noToken.status == .forbidden)
         #expect(await client.get("/session/", headers: [.cookie: cookie]).status == .unauthorized)
     }
@@ -4082,7 +4183,7 @@ struct SessionControllerTests {
     @Test("signing out regenerates the id and the old cookie no longer signs anyone in")
     func signOut() async throws {
         let client = try client()
-        let (cookie, token) = try await signIn(client, as: "demo:ada")
+        let (cookie, token) = try await signIn(client)
 
         let out = await client.delete(
             "/session/", headers: [.cookie: cookie, .xCSRFToken: token])
@@ -4094,7 +4195,7 @@ struct SessionControllerTests {
     @Test("signing out with no CSRF token, or the wrong one, is refused — the cookie still signs in")
     func signOutWithoutTokenRefused() async throws {
         let client = try client()
-        let (cookie, _) = try await signIn(client, as: "demo:ada")
+        let (cookie, _) = try await signIn(client)
 
         #expect(await client.delete("/session/", headers: [.cookie: cookie]).status == .forbidden)
         #expect(
@@ -4595,6 +4696,16 @@ flight:
 #     issuer: https://your-tenant.example.com/
 #     audience: flight-demo
 #     roles_claim: realm_access.roles
+#
+# Browser sign-in is the same story. This demo checks passwords itself
+# (FlightPasswordSignInModule over DemoAccountsModule); to sign in through
+# the same provider instead, list FlightOIDCSignInModule in Main.swift in
+# place of those two and add the client this application is to it:
+#
+#     client-id: flight-demo
+#     client-secret: "…"                 # omit for a public client
+#     redirect-uri: https://app.example.com/session/callback
+#     post-logout-redirect-uri: https://app.example.com/
 
 """#,
         ],

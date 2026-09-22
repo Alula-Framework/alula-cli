@@ -1492,34 +1492,58 @@ cookie round-trips and not only that the handler reads what it wrote.
 
 ### Signing in with the cookie
 
-The same session carries an identity. `SessionController` checks a
-credential once — the demo's own validator, the same one the bearer path
-uses — and stores the resulting `Principal`:
+The same session carries an identity. `SessionController` signs a browser
+in — and is written so that it does not know *who* checks the password:
 
 ```swift
+@Inject var provider: any SignInProvider
+
+@GetRoute("/sign-in")
+func begin(_ context: RequestContext) async throws -> Response {
+    try await provider.beginSignIn(context, returnTo: context.request.queryParam("return-to"))
+        .response()
+}
+
 @PostRoute("/", pipelines: [.default, "csrf"])       // the lane is explained below
-func signIn(_ context: RequestContext, body: SignIn) async throws -> Response {
-    let principal = try await validator.validate(body.token)
-    try context.requireSession().signIn(principal)
-    return .status(.noContent)
+func signIn(_ context: RequestContext) async throws -> Response {
+    try await provider.signIn(context).response()
 }
 
 @GetRoute("/", pipelines: [.authenticated])
 func whoAmI(_ context: RequestContext) throws -> WhoAmI {
     let principal = try context.requirePrincipal()          // from the cookie, not a header
     return WhoAmI(
-        subject: principal.subject, roles: principal.roles.sorted(),
-        csrfToken: try context.requireSession().csrfToken())
+        subject: principal.subject, email: principal.email, name: principal.name,
+        roles: principal.roles.sorted(), csrfToken: try context.requireSession().csrfToken())
 }
 ```
+
+The provider comes from a module. `Main.swift` lists
+`FlightPasswordSignInModule`, which checks passwords against a
+`CredentialStore` — here `DemoAccountsModule`'s in-memory one, seeded with
+`ada@example.com` / `correct horse`. A real application implements that
+protocol over its own users table: two methods, find an account by what the
+user typed and save a stronger hash. The authenticator behind it does the
+parts that are easy to get wrong — throttling before hashing, the same work
+for an account that does not exist, one answer for every wrong guess.
+
+`begin` answers with the form to draw — two fields, with the `autocomplete`
+tokens password managers look for. **Switching to Keycloak, Auth0 or any
+OpenID Connect provider is one line**: list `FlightOIDCSignInModule` instead
+and add a `security.oidc` block. `begin` then answers with a redirect to
+the provider's own page, and the `GET /session/callback` route already in
+the controller finishes the sign-in. Nothing else here changes, and
+`principal.email` means the same thing either way — every provider emits
+the same standard claims.
 
 From then on `Authentication` finds the principal in the session on every
 request that carries the cookie, and `requirePrincipal()`, `roles:` and the
 `.authenticated` lane behave exactly as they do for a bearer token. Nothing
 orders the two middlewares by hand: `FlightSecurityModule` is handed the
 session runtime in composition and runs `Sessions` ahead of
-`Authentication` in every lane it declares. `signIn` regenerates the session
-id, so an id handed out before signing in is never the one signed in.
+`Authentication` in every lane it declares. Signing in regenerates the
+session id, so an id handed out before signing in is never the one signed
+in.
 
 ### Guarding both ends
 
@@ -1535,14 +1559,13 @@ func csrf(_ context: RequestContext) throws -> CSRFToken {
 }
 
 @DeleteRoute("/", pipelines: [.default, "csrf"])
-func signOut(_ context: RequestContext) throws -> Response {
-    try context.requireSession().signOut()
-    return .status(.noContent)
+func signOut(_ context: RequestContext) async throws -> Response {
+    try await provider.signOut(context).response()
 }
 ```
 
-Sign-in is the one people leave open, and here it would be forgeable. A
-`Codable` body also accepts `application/x-www-form-urlencoded`, which a
+Sign-in is the one people leave open, and here it would be forgeable. The
+password provider also accepts `application/x-www-form-urlencoded`, which a
 plain HTML form on any site can submit with no preflight, and
 `SameSite=Lax` limits which cookies that POST *sends*, not which its
 response *sets*. Unguarded, a hostile page could sign a visitor into the
@@ -1573,18 +1596,21 @@ $ curl -si -X POST localhost:8080/visits/lobby | grep -i set-cookie
 set-cookie: session=…; Path=/; Max-Age=1209600; HttpOnly; SameSite=Lax
 $ curl -s localhost:8080/visits/last -H 'Cookie: session=…'
 {"slug":"lobby"}
+$ curl -s localhost:8080/session/sign-in
+{"fields":[{"name":"identifier",…},{"name":"password",…}]}  # the form to draw
 $ curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8080/session \
-       -H 'content-type: application/json' -d '{"token":"demo:ada:admin"}'
+       -H 'content-type: application/json' \
+       -d '{"identifier":"ada@example.com","password":"correct horse"}'
 403                                                        # no token: login CSRF refused
 $ curl -si localhost:8080/session/csrf
 set-cookie: session=…                                     # minting the token stores a session
 {"csrfToken":"…"}
 $ curl -si -X POST localhost:8080/session -H 'content-type: application/json' \
        -H 'Cookie: session=…' -H 'X-CSRF-Token: …' \
-       -d '{"token":"demo:ada:admin"}' | grep -i set-cookie
-set-cookie: session=…                                     # a new id: signIn regenerated it
+       -d '{"identifier":"ada@example.com","password":"correct horse"}' | grep -i set-cookie
+set-cookie: session=…                                     # a new id: signing in regenerated it
 $ curl -s localhost:8080/session -H 'Cookie: session=…'
-{"roles":["admin"],"subject":"ada","csrfToken":"…"}       # the same token as before
+{"email":"ada@example.com","name":"Ada Lovelace","roles":["admin","author"],…}
 $ curl -si -X DELETE localhost:8080/session \
        -H 'Cookie: session=…' -H 'X-CSRF-Token: …' | grep -i set-cookie
 set-cookie: session=…                                     # signOut regenerated the id too
