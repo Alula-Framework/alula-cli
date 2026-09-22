@@ -2,6 +2,7 @@ import FlightActuator
 import FlightChannels
 import FlightCache
 import FlightCore
+import FlightRateLimit
 import FlightDataPostgres
 import FlightPresence
 import FlightPubSub
@@ -57,7 +58,7 @@ struct BootstrapTests {
                 pubsub,
                 demoChannels,
                 channels,
-                AppModule(graph: graph),
+                AppModule(graph: graph, limiter: RateLimiter(store: InMemoryRateLimitStore())),
                 FlightSecurityModule(validator: auth.tokenValidator),
                 ActuatorModule(),
                 presenceModule,

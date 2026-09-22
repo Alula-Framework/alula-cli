@@ -1547,9 +1547,38 @@ static var dependencies: [any FlightModule.Type] {
         FlightSchedulerModule.self,
         FlightSecurityModule.self,
         FlightSessionsModule.self,
+        FlightRateLimitModule.self,
     ]
 }
 ```
+
+That last one comes with a decision the framework refuses to make for you.
+`AppModule` puts a `RateLimiting` in the default lane, and its key closure
+is required:
+
+```swift
+RateLimiting(store: limiter.store, quota: .perMinute(300)) { context in
+    context.principal?.subject ?? "path:\(context.request.path)"
+}
+```
+
+Signed-in callers get their own budget, so one noisy user cannot spend
+everyone else's. Anonymous traffic falls back to the path, which at least
+bounds each endpoint. Keying anonymous traffic by *address* is what you
+would usually reach for, and flight cannot do it yet: `Request` carries no
+peer address. That gap is about the key, not the limiter — everything else
+works today.
+
+It runs after `Authentication`, which is the only reason reading the
+principal works. `AppModule` depends on `FlightSecurityModule`, and lane
+order follows the module graph, so security's middleware sorts ahead of
+this. Reverse that dependency and the key would silently read `nil` on
+every request and limit the entire world as one caller.
+
+Both the store and the session store are per process here. The Valkey
+modules in flight-data make each of them mean one thing across every
+replica, which is a module in the list rather than a change to any of
+this code.
 
 One line each. The DAG orders them; you do not. `FlightChannelsModule` is not
 in that list because it is `DemoChannelsModule`'s dependency rather than this

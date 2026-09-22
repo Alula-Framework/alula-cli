@@ -1,0 +1,81 @@
+import FlightCore
+import FlightRateLimit
+import FlightRateLimitTesting
+import FlightSecurityCore
+import FlightWeb
+import FlightWebTesting
+import HTTPTypes
+import Testing
+
+@testable import App
+
+/// The demo limits by signed-in subject, falling back to the path. This
+/// suite pins the part that is easy to get wrong: that two callers really do
+/// have separate budgets, and that the limit is enforced rather than merely
+/// configured.
+@Suite("Rate limiting")
+struct RateLimitingTests {
+    private let store = RecordingRateLimitStore()
+
+    /// The demo's own key rule, with a quota small enough to reach in a test.
+    private func client(quota: RateLimitQuota = .perMinute(2)) throws -> TestClient {
+        let validator: any TokenValidator = DemoTokenValidator()
+        let security = FlightSecurityModule(validator: validator)
+        let limiting = RateLimiting(store: store, quota: quota) { context in
+            context.principal?.subject ?? "path:\(context.request.path)"
+        }
+        // A route of this suite's own rather than a controller: what is
+        // under test is the lane, and borrowing a controller would couple
+        // this to whatever that controller happens to inject.
+        let route = RouteRegistration(method: .get, path: "/health", source: "test") { _ in
+            .text("ok")
+        }
+        return try TestClient(
+            routes: [route],
+            middleware: security.middleware
+                + MiddlewareRegistration.lane(.default, [limiting]))
+    }
+
+    private func authorization(_ subject: String) -> HTTPFields {
+        [.authorization: "Bearer demo:\(subject)"]
+    }
+
+    @Test("a caller over the quota is refused with a Retry-After")
+    func refusesOverTheQuota() async throws {
+        let client = try client()
+        for _ in 0..<2 {
+            #expect(await client.get("/health", headers: authorization("ada")).status == .ok)
+        }
+        let denied = await client.get("/health", headers: authorization("ada"))
+        #expect(denied.status == .tooManyRequests)
+        #expect(denied.header("retry-after") != nil)
+        #expect(denied.header("x-ratelimit-remaining") == "0")
+    }
+
+    @Test("one noisy caller does not spend another's budget")
+    func budgetsAreSeparate() async throws {
+        let client = try client()
+        for _ in 0..<3 { _ = await client.get("/health", headers: authorization("ada")) }
+        #expect(
+            await client.get("/health", headers: authorization("grace")).status == .ok,
+            "grace has her own budget, because the key is the subject")
+        #expect(store.callCount(for: "ada") == 3)
+        #expect(store.callCount(for: "grace") == 1)
+    }
+
+    @Test("anonymous traffic is keyed by path, not lumped into one bucket")
+    func anonymousKeyedByPath() async throws {
+        let client = try client()
+        _ = await client.get("/health")
+        #expect(store.consumed.last?.key == "path:/health")
+    }
+
+    @Test("the quota replenishes")
+    func replenishes() async throws {
+        let client = try client()
+        for _ in 0..<2 { _ = await client.get("/health", headers: authorization("ada")) }
+        #expect(await client.get("/health", headers: authorization("ada")).status == .tooManyRequests)
+        store.advance(by: .seconds(60))
+        #expect(await client.get("/health", headers: authorization("ada")).status == .ok)
+    }
+}

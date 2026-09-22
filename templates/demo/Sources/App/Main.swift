@@ -5,6 +5,7 @@ import FlightCore
 import FlightDataPostgres
 import FlightPresence
 import FlightPubSub
+import FlightRateLimit
 import FlightScheduler
 import FlightSchedulerPostgres
 import FlightSecurityCore
@@ -55,6 +56,10 @@ struct AppModule: FlightModule {
             // right for one process; `FlightSessionsValkeyModule` from
             // flight-data makes it shared when there are more.
             FlightSessionsModule.self,
+            // Rate limiting. Same story about one process:
+            // `FlightRateLimitValkeyModule` makes a quota mean one thing
+            // across every replica instead of one thing per replica.
+            FlightRateLimitModule.self,
         ]
     }
 
@@ -86,11 +91,37 @@ struct AppModule: FlightModule {
     /// which the composer aggregates middleware into.
     let middleware: [MiddlewareRegistration]
 
-    init(graph: FlightGraph) {
+    /// `RateLimiter` comes from `FlightRateLimitModule`, matched by type in
+    /// composition the way every other value a module takes is.
+    init(graph: FlightGraph, limiter: RateLimiter) {
         self.graph = graph
         self.jobCoordinator = PostgresJobCoordinator(dataSource: graph.postgresDataSource)
         self.errorMapper = AppErrorMapping.mapper()
-        self.middleware = MiddlewareRegistration.lane(.default, [RequestLogging()])
+        self.middleware = MiddlewareRegistration.lane(
+            .default,
+            [
+                RequestLogging(),
+                // The key closure is required, and choosing it is the whole
+                // decision. Here: the signed-in subject when there is one,
+                // the path otherwise — so one noisy user cannot spend
+                // everyone else's budget, and anonymous traffic is at least
+                // bounded per endpoint.
+                //
+                // Keying anonymous traffic by *address* is what you would
+                // usually want, and flight cannot do it yet: `Request`
+                // carries no peer address. That gap is about the key, not
+                // the limiter.
+                //
+                // This runs after `Authentication`, which is why reading the
+                // principal works: `AppModule` depends on
+                // `FlightSecurityModule`, and lane order follows the module
+                // graph. Reverse that dependency and this would silently see
+                // `nil` on every request and limit the whole world as one
+                // caller.
+                RateLimiting(store: limiter.store, quota: .perMinute(300)) { context in
+                    context.principal?.subject ?? "path:\(context.request.path)"
+                },
+            ])
     }
 
     // The socket route itself is `SocketController`, declared with
