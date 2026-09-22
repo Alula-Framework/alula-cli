@@ -1507,7 +1507,9 @@ func signIn(_ context: RequestContext, body: SignIn) async throws -> Response {
 @GetRoute("/", pipelines: [.authenticated])
 func whoAmI(_ context: RequestContext) throws -> WhoAmI {
     let principal = try context.requirePrincipal()          // from the cookie, not a header
-    return WhoAmI(subject: principal.subject, roles: principal.roles.sorted())
+    return WhoAmI(
+        subject: principal.subject, roles: principal.roles.sorted(),
+        csrfToken: try context.requireSession().csrfToken())
 }
 ```
 
@@ -1518,6 +1520,38 @@ orders the two middlewares by hand: `FlightSecurityModule` is handed the
 session runtime in composition and runs `Sessions` ahead of
 `Authentication` in every lane it declares. `signIn` regenerates the session
 id, so an id handed out before signing in is never the one signed in.
+
+### Signing out, guarded
+
+A cookie is ambient: a browser attaches it to a request a page never asked
+the visitor to make. `CSRFProtection` is the middleware that refuses such a
+request without a token only the session itself could have handed out —
+`Session.csrfToken()` — and `signOut` is this demo's one route that needs
+it:
+
+```swift
+@DeleteRoute("/", pipelines: [.default, "csrf"])
+func signOut(_ context: RequestContext) throws -> Response {
+    try context.requireSession().signOut()
+    return .status(.noContent)
+}
+```
+
+`"csrf"` is a lane `AppModule` fills with `CSRFProtection()`, appended to
+`.default` rather than folded into it — every other route in this app gets
+a session too, since `Sessions` sits unconditionally in `.default`, but
+none of the bearer-token ones has a *cookie* carrying real authority for
+CSRF to protect, and folding the check into `.default` would ask all of
+them for a token they have no page to have read one from. `whoAmI` is
+where the token comes from: any client about to offer a "sign out" button
+already called it to know there was one to show.
+
+Sign-*in* is deliberately not guarded the same way. An anonymous visitor
+has no session yet to have read a token out of, and this demo is JSON-only
+— there is no server-rendered login page to embed one in ahead of time.
+That gap has a name, "login CSRF," and a real application closes it with a
+page or a dedicated token endpoint; see `Docs/web.md` in flight for the
+pattern once there is one to hang it on.
 
 ### Checkpoint
 
@@ -1530,7 +1564,12 @@ $ curl -si -X POST localhost:8080/session -H 'content-type: application/json' \
        -d '{"token":"demo:ada:admin"}' | grep -i set-cookie
 set-cookie: session=…                                    # a new id: signIn regenerated it
 $ curl -s localhost:8080/session -H 'Cookie: session=…'
-{"roles":["admin"],"subject":"ada"}
+{"roles":["admin"],"subject":"ada","csrfToken":"…"}
+$ curl -s -o /dev/null -w '%{http_code}\n' -X DELETE localhost:8080/session -H 'Cookie: session=…'
+403                                                        # no X-CSRF-Token: refused, cookie and all
+$ curl -si -X DELETE localhost:8080/session \
+       -H 'Cookie: session=…' -H 'X-CSRF-Token: …' | grep -i set-cookie
+set-cookie: session=…                                     # signOut regenerated the id too
 ```
 
 ## Stage 3.9 — Wiring it together

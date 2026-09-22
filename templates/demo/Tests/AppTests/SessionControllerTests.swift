@@ -10,8 +10,8 @@ import Testing
 @testable import App
 
 /// The whole browser sign-in path, in process: the demo validator, the
-/// session middleware, and the security lanes composed the way `AppModule`
-/// composes them.
+/// session middleware, the security lanes, and the `"csrf"` lane sign-out
+/// names — composed the way `AppModule` composes them.
 @Suite("SessionController — cookie sign-in")
 struct SessionControllerTests {
     private let store = RecordingSessionStore()
@@ -24,7 +24,9 @@ struct SessionControllerTests {
         let security = FlightSecurityModule(validator: validator, sessions: sessions.runtime)
         return try TestClient(
             routes: SessionController.flightRoutes { _ in SessionController(validator: validator) },
-            middleware: sessions.middleware + security.middleware)
+            middleware:
+                sessions.middleware + security.middleware
+                + MiddlewareRegistration.lane("csrf", [CSRFProtection()]))
     }
 
     private func sessionCookie(_ response: Response) -> String? {
@@ -47,6 +49,7 @@ struct SessionControllerTests {
         let identity = try who.decodeJSON(SessionController.WhoAmI.self)
         #expect(identity.subject == "ada")
         #expect(identity.roles == ["admin", "author"])
+        #expect(!identity.csrfToken.isEmpty)
     }
 
     @Test("a bad credential is a 401 with nothing stored")
@@ -62,9 +65,34 @@ struct SessionControllerTests {
         let client = try client()
         let cookie = try #require(
             sessionCookie(try await client.post("/session/", json: SessionController.SignIn(token: "demo:ada"))))
-        let out = await client.delete("/session/", headers: [.cookie: cookie])
+        let token = try (await client.get("/session/", headers: [.cookie: cookie]))
+            .decodeJSON(SessionController.WhoAmI.self).csrfToken
+
+        let out = await client.delete(
+            "/session/", headers: [.cookie: cookie, .xCSRFToken: token])
         #expect(out.status == .noContent)
         #expect(sessionCookie(out) != cookie)
         #expect(await client.get("/session/", headers: [.cookie: cookie]).status == .unauthorized)
     }
+
+    @Test("signing out with no CSRF token, or the wrong one, is refused — the cookie still signs in")
+    func signOutWithoutTokenRefused() async throws {
+        let client = try client()
+        let cookie = try #require(
+            sessionCookie(try await client.post("/session/", json: SessionController.SignIn(token: "demo:ada"))))
+
+        #expect(await client.delete("/session/", headers: [.cookie: cookie]).status == .forbidden)
+        #expect(
+            await client.delete(
+                "/session/", headers: [.cookie: cookie, .xCSRFToken: "not-the-real-token"]
+            ).status == .forbidden)
+        #expect(await client.get("/session/", headers: [.cookie: cookie]).status == .ok)
+    }
+}
+
+extension HTTPField.Name {
+    /// The demo's tests live outside `FlightWeb`, so this is the public name
+    /// — the same literal `CSRFProtection` checks internally, declared here
+    /// because a test has no reason to `@testable import` the framework.
+    fileprivate static let xCSRFToken = HTTPField.Name("x-csrf-token")!
 }

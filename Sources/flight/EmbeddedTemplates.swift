@@ -731,7 +731,7 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.27.0", traits: ["Security"]),
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.29.1", traits: ["Security"]),
         .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.9.0", traits: ["Postgres"]),
     ],
     targets: [
@@ -1452,12 +1452,25 @@ import FlightWeb
 /// `Principal` in the session, and from then on `Authentication` finds it
 /// there on every request that carries the cookie.
 ///
+/// `DELETE /` — signing out — is this demo's one `CSRFProtection`-guarded
+/// route: `"csrf"` names a lane `AppModule` fills with `CSRFProtection()`,
+/// and `whoAmI` hands out the token every signed-in caller already has to
+/// fetch to render a page at all. `POST /` — signing in — deliberately does
+/// not carry the same guard: an anonymous visitor has no session yet to have
+/// read a token from, and there is no server-rendered login page here to
+/// embed one in ahead of time. That is "login CSRF," a real if narrower
+/// attack (forcing a victim to authenticate as someone else, not to act as
+/// themselves), and defending it needs a page or a dedicated token endpoint
+/// this JSON-only demo does not have — see Docs/web.md in flight for the
+/// pattern once it does.
+///
 /// Try it:
 ///
 ///     curl -si -X POST localhost:8080/session -H 'content-type: application/json' \
 ///          -d '{"token":"demo:ada:admin"}'                   # Set-Cookie: session=…
-///     curl -s localhost:8080/session -H 'Cookie: session=…'  # {"subject":"ada","roles":["admin"]}
-///     curl -si -X DELETE localhost:8080/session -H 'Cookie: session=…'
+///     curl -s localhost:8080/session -H 'Cookie: session=…'  # {"subject":"ada","roles":[...],"csrfToken":"..."}
+///     curl -si -X DELETE localhost:8080/session \
+///          -H 'Cookie: session=…' -H 'X-CSRF-Token: …'       # the token whoAmI just answered with
 @Controller("/session")
 struct SessionController {
     /// The demo's validator, provided by `DemoAuthModule` as a value.
@@ -1470,6 +1483,11 @@ struct SessionController {
     struct WhoAmI: Codable, ResponseEncodable {
         let subject: String
         let roles: [String]
+        /// What `DELETE /` needs on `X-CSRF-Token`. Reading it here costs
+        /// nothing extra: `whoAmI` already runs on an established,
+        /// already-persisted session — unlike an anonymous route, there is
+        /// no "a mere read now creates a store entry" cost to worry about.
+        let csrfToken: String
     }
 
     /// Checks the credential once and remembers who it was. The session id
@@ -1495,10 +1513,14 @@ struct SessionController {
     @GetRoute("/", pipelines: [.authenticated])
     func whoAmI(_ context: RequestContext) throws -> WhoAmI {
         let principal = try context.requirePrincipal()
-        return WhoAmI(subject: principal.subject, roles: principal.roles.sorted())
+        return WhoAmI(
+            subject: principal.subject, roles: principal.roles.sorted(),
+            csrfToken: try context.requireSession().csrfToken())
     }
 
-    @DeleteRoute("/")
+    /// Needs `X-CSRF-Token`, from the `whoAmI` this same browser already
+    /// called to render anything worth showing a "sign out" button on.
+    @DeleteRoute("/", pipelines: [.default, "csrf"])
     func signOut(_ context: RequestContext) throws -> Response {
         try context.requireSession().signOut()
         return .status(.noContent)
@@ -2006,6 +2028,23 @@ struct AppModule: FlightModule {
                     context.principal?.subject ?? context.clientAddress?.host ?? "unknown"
                 },
             ])
+            + MiddlewareRegistration.lane(
+                "csrf",
+                [
+                    // `SessionController`'s sign-out is the only route naming
+                    // this lane (`pipelines: [.default, "csrf"]`): it is the
+                    // one place in this demo an ambient cookie alone could be
+                    // made to act, since signing in is what puts a principal
+                    // in the session in the first place. A lane of its own,
+                    // rather than folding `CSRFProtection` into `.default`,
+                    // keeps every bearer-token controller — which gets a
+                    // session too, since `Sessions` is unconditionally in
+                    // `.default`, but never a cookie carrying real authority
+                    // — from having to present a token it has no page to have
+                    // read one from. See `SessionController`'s own doc for
+                    // why sign-*in* is not guarded the same way.
+                    CSRFProtection()
+                ])
     }
 
     // The socket route itself is `SocketController`, declared with
@@ -3926,8 +3965,8 @@ import Testing
 @testable import App
 
 /// The whole browser sign-in path, in process: the demo validator, the
-/// session middleware, and the security lanes composed the way `AppModule`
-/// composes them.
+/// session middleware, the security lanes, and the `"csrf"` lane sign-out
+/// names — composed the way `AppModule` composes them.
 @Suite("SessionController — cookie sign-in")
 struct SessionControllerTests {
     private let store = RecordingSessionStore()
@@ -3940,7 +3979,9 @@ struct SessionControllerTests {
         let security = FlightSecurityModule(validator: validator, sessions: sessions.runtime)
         return try TestClient(
             routes: SessionController.flightRoutes { _ in SessionController(validator: validator) },
-            middleware: sessions.middleware + security.middleware)
+            middleware:
+                sessions.middleware + security.middleware
+                + MiddlewareRegistration.lane("csrf", [CSRFProtection()]))
     }
 
     private func sessionCookie(_ response: Response) -> String? {
@@ -3963,6 +4004,7 @@ struct SessionControllerTests {
         let identity = try who.decodeJSON(SessionController.WhoAmI.self)
         #expect(identity.subject == "ada")
         #expect(identity.roles == ["admin", "author"])
+        #expect(!identity.csrfToken.isEmpty)
     }
 
     @Test("a bad credential is a 401 with nothing stored")
@@ -3978,11 +4020,36 @@ struct SessionControllerTests {
         let client = try client()
         let cookie = try #require(
             sessionCookie(try await client.post("/session/", json: SessionController.SignIn(token: "demo:ada"))))
-        let out = await client.delete("/session/", headers: [.cookie: cookie])
+        let token = try (await client.get("/session/", headers: [.cookie: cookie]))
+            .decodeJSON(SessionController.WhoAmI.self).csrfToken
+
+        let out = await client.delete(
+            "/session/", headers: [.cookie: cookie, .xCSRFToken: token])
         #expect(out.status == .noContent)
         #expect(sessionCookie(out) != cookie)
         #expect(await client.get("/session/", headers: [.cookie: cookie]).status == .unauthorized)
     }
+
+    @Test("signing out with no CSRF token, or the wrong one, is refused — the cookie still signs in")
+    func signOutWithoutTokenRefused() async throws {
+        let client = try client()
+        let cookie = try #require(
+            sessionCookie(try await client.post("/session/", json: SessionController.SignIn(token: "demo:ada"))))
+
+        #expect(await client.delete("/session/", headers: [.cookie: cookie]).status == .forbidden)
+        #expect(
+            await client.delete(
+                "/session/", headers: [.cookie: cookie, .xCSRFToken: "not-the-real-token"]
+            ).status == .forbidden)
+        #expect(await client.get("/session/", headers: [.cookie: cookie]).status == .ok)
+    }
+}
+
+extension HTTPField.Name {
+    /// The demo's tests live outside `FlightWeb`, so this is the public name
+    /// — the same literal `CSRFProtection` checks internally, declared here
+    /// because a test has no reason to `@testable import` the framework.
+    fileprivate static let xCSRFToken = HTTPField.Name("x-csrf-token")!
 }
 
 """#,
