@@ -1558,16 +1558,19 @@ is required:
 
 ```swift
 RateLimiting(store: limiter.store, quota: .perMinute(300)) { context in
-    context.principal?.subject ?? "path:\(context.request.path)"
+    context.principal?.subject ?? context.clientAddress?.host ?? "unknown"
 }
 ```
 
 Signed-in callers get their own budget, so one noisy user cannot spend
-everyone else's. Anonymous traffic falls back to the path, which at least
-bounds each endpoint. Keying anonymous traffic by *address* is what you
-would usually reach for, and flight cannot do it yet: `Request` carries no
-peer address. That gap is about the key, not the limiter — everything else
-works today.
+everyone else's. Anonymous traffic falls back to `clientAddress` — the real
+caller, not necessarily `Request.remoteAddress`: behind a reverse proxy the
+raw TCP peer is the proxy, and `clientAddress` is what accounts for that,
+resolved from `X-Forwarded-For` only when `web.trusted-proxies` names the
+connection as one to believe. Nothing is trusted by default, so this demo,
+with no proxy configured, sees its own loopback connection as the address
+either way. A deployment behind a real proxy sets `web.trusted-proxies` in
+its own environment's config, and nothing here changes.
 
 It runs after `Authentication`, which is the only reason reading the
 principal works. `AppModule` depends on `FlightSecurityModule`, and lane

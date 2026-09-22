@@ -22,7 +22,7 @@ struct RateLimitingTests {
         let validator: any TokenValidator = DemoTokenValidator()
         let security = FlightSecurityModule(validator: validator)
         let limiting = RateLimiting(store: store, quota: quota) { context in
-            context.principal?.subject ?? "path:\(context.request.path)"
+            context.principal?.subject ?? context.clientAddress?.host ?? "unknown"
         }
         // A route of this suite's own rather than a controller: what is
         // under test is the lane, and borrowing a controller would couple
@@ -63,11 +63,38 @@ struct RateLimitingTests {
         #expect(store.callCount(for: "grace") == 1)
     }
 
-    @Test("anonymous traffic is keyed by path, not lumped into one bucket")
-    func anonymousKeyedByPath() async throws {
+    @Test("anonymous callers are keyed by their real address, not lumped into one bucket")
+    func anonymousKeyedByAddress() async throws {
+        let client = try client()
+        _ = await client.execute(
+            Request(method: .get, path: "/health", remoteAddress: PeerAddress(host: "203.0.113.9")))
+        #expect(store.consumed.last?.key == "203.0.113.9")
+
+        for _ in 0..<2 {
+            _ = await client.execute(
+                Request(method: .get, path: "/health", remoteAddress: PeerAddress(host: "203.0.113.20")))
+        }
+        #expect(
+            await client.execute(
+                Request(method: .get, path: "/health", remoteAddress: PeerAddress(host: "203.0.113.20"))
+            ).status == .tooManyRequests,
+            "the second anonymous caller reached its own limit — the first one's budget was untouched")
+        #expect(
+            await client.execute(
+                Request(method: .get, path: "/health", remoteAddress: PeerAddress(host: "203.0.113.9"))
+            ).status == .ok,
+            "and still has its own budget left"
+        )
+    }
+
+    @Test("an anonymous caller with no real socket behind it falls back to the unknown bucket")
+    func noRemoteAddressFallsBack() async throws {
+        // `TestClient.get` builds a `Request` with no `remoteAddress`, the
+        // same shape a hand-built request in a snippet has. The key closure
+        // still has to answer something.
         let client = try client()
         _ = await client.get("/health")
-        #expect(store.consumed.last?.key == "path:/health")
+        #expect(store.consumed.last?.key == "unknown")
     }
 
     @Test("the quota replenishes")

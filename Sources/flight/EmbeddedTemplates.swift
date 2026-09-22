@@ -731,7 +731,7 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.26.1", traits: ["Security"]),
+        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.27.0", traits: ["Security"]),
         .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.9.0", traits: ["Postgres"]),
     ],
     targets: [
@@ -1981,14 +1981,20 @@ struct AppModule: FlightModule {
                 RequestLogging(),
                 // The key closure is required, and choosing it is the whole
                 // decision. Here: the signed-in subject when there is one,
-                // the path otherwise — so one noisy user cannot spend
-                // everyone else's budget, and anonymous traffic is at least
-                // bounded per endpoint.
+                // the real caller's address otherwise — so one noisy user
+                // cannot spend everyone else's budget, and anonymous
+                // traffic is bounded per caller rather than lumped
+                // together as one.
                 //
-                // Keying anonymous traffic by *address* is what you would
-                // usually want, and flight cannot do it yet: `Request`
-                // carries no peer address. That gap is about the key, not
-                // the limiter.
+                // `clientAddress` is the raw socket peer unless
+                // `web.trusted-proxies` names this connection as a trusted
+                // reverse proxy, in which case it is resolved from
+                // `X-Forwarded-For` instead — see Docs/client-address.md
+                // for why that needs a policy at all. This demo runs with
+                // no proxy configured, so it is the loopback address that
+                // connects to it; a deployment behind one sets
+                // `web.trusted-proxies` in its own environment's
+                // flight-*.yaml, and nothing here changes.
                 //
                 // This runs after `Authentication`, which is why reading the
                 // principal works: `AppModule` depends on
@@ -1997,7 +2003,7 @@ struct AppModule: FlightModule {
                 // `nil` on every request and limit the whole world as one
                 // caller.
                 RateLimiting(store: limiter.store, quota: .perMinute(300)) { context in
-                    context.principal?.subject ?? "path:\(context.request.path)"
+                    context.principal?.subject ?? context.clientAddress?.host ?? "unknown"
                 },
             ])
     }
@@ -3388,7 +3394,7 @@ struct RateLimitingTests {
         let validator: any TokenValidator = DemoTokenValidator()
         let security = FlightSecurityModule(validator: validator)
         let limiting = RateLimiting(store: store, quota: quota) { context in
-            context.principal?.subject ?? "path:\(context.request.path)"
+            context.principal?.subject ?? context.clientAddress?.host ?? "unknown"
         }
         // A route of this suite's own rather than a controller: what is
         // under test is the lane, and borrowing a controller would couple
@@ -3429,11 +3435,38 @@ struct RateLimitingTests {
         #expect(store.callCount(for: "grace") == 1)
     }
 
-    @Test("anonymous traffic is keyed by path, not lumped into one bucket")
-    func anonymousKeyedByPath() async throws {
+    @Test("anonymous callers are keyed by their real address, not lumped into one bucket")
+    func anonymousKeyedByAddress() async throws {
+        let client = try client()
+        _ = await client.execute(
+            Request(method: .get, path: "/health", remoteAddress: PeerAddress(host: "203.0.113.9")))
+        #expect(store.consumed.last?.key == "203.0.113.9")
+
+        for _ in 0..<2 {
+            _ = await client.execute(
+                Request(method: .get, path: "/health", remoteAddress: PeerAddress(host: "203.0.113.20")))
+        }
+        #expect(
+            await client.execute(
+                Request(method: .get, path: "/health", remoteAddress: PeerAddress(host: "203.0.113.20"))
+            ).status == .tooManyRequests,
+            "the second anonymous caller reached its own limit — the first one's budget was untouched")
+        #expect(
+            await client.execute(
+                Request(method: .get, path: "/health", remoteAddress: PeerAddress(host: "203.0.113.9"))
+            ).status == .ok,
+            "and still has its own budget left"
+        )
+    }
+
+    @Test("an anonymous caller with no real socket behind it falls back to the unknown bucket")
+    func noRemoteAddressFallsBack() async throws {
+        // `TestClient.get` builds a `Request` with no `remoteAddress`, the
+        // same shape a hand-built request in a snippet has. The key closure
+        // still has to answer something.
         let client = try client()
         _ = await client.get("/health")
-        #expect(store.consumed.last?.key == "path:/health")
+        #expect(store.consumed.last?.key == "unknown")
     }
 
     @Test("the quota replenishes")

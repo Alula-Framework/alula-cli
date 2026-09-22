@@ -103,14 +103,20 @@ struct AppModule: FlightModule {
                 RequestLogging(),
                 // The key closure is required, and choosing it is the whole
                 // decision. Here: the signed-in subject when there is one,
-                // the path otherwise — so one noisy user cannot spend
-                // everyone else's budget, and anonymous traffic is at least
-                // bounded per endpoint.
+                // the real caller's address otherwise — so one noisy user
+                // cannot spend everyone else's budget, and anonymous
+                // traffic is bounded per caller rather than lumped
+                // together as one.
                 //
-                // Keying anonymous traffic by *address* is what you would
-                // usually want, and flight cannot do it yet: `Request`
-                // carries no peer address. That gap is about the key, not
-                // the limiter.
+                // `clientAddress` is the raw socket peer unless
+                // `web.trusted-proxies` names this connection as a trusted
+                // reverse proxy, in which case it is resolved from
+                // `X-Forwarded-For` instead — see Docs/client-address.md
+                // for why that needs a policy at all. This demo runs with
+                // no proxy configured, so it is the loopback address that
+                // connects to it; a deployment behind one sets
+                // `web.trusted-proxies` in its own environment's
+                // flight-*.yaml, and nothing here changes.
                 //
                 // This runs after `Authentication`, which is why reading the
                 // principal works: `AppModule` depends on
@@ -119,7 +125,7 @@ struct AppModule: FlightModule {
                 // `nil` on every request and limit the whole world as one
                 // caller.
                 RateLimiting(store: limiter.store, quota: .perMinute(300)) { context in
-                    context.principal?.subject ?? "path:\(context.request.path)"
+                    context.principal?.subject ?? context.clientAddress?.host ?? "unknown"
                 },
             ])
     }
