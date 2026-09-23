@@ -1,6 +1,6 @@
 import Foundation
-import FlightDataPostgres
-import FlightWeb
+import AlulaDataPostgres
+import AlulaWeb
 
 /// A chat message, and the demo's most heavily-related entity: it belongs to
 /// a room, optionally belongs to an author and to a parent message, and

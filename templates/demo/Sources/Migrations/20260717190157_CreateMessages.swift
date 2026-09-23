@@ -1,4 +1,4 @@
-import FlightMigrate
+import AlulaMigrate
 
 struct CreateMessages: Migration {
     // Postgres runs this migration inside a transaction together with its

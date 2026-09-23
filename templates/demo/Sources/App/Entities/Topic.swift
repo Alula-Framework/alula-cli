@@ -1,6 +1,6 @@
 import Foundation
-import FlightDataPostgres
-import FlightWeb
+import AlulaDataPostgres
+import AlulaWeb
 
 /// A tag a message can carry. Reached from `ChatMessage` through
 /// `MessageTopic` — a many-to-many, which Hangar preloads as two batched

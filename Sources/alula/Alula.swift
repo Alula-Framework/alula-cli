@@ -1,10 +1,10 @@
 import ArgumentParser
 
 @main
-struct Flight: AsyncParsableCommand {
+struct Alula: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "flight",
-        abstract: "Scaffolding and tooling for Flight applications.",
+        commandName: "alula",
+        abstract: "Scaffolding and tooling for Alula applications.",
         version: "0.1.0",
         subcommands: [New.self, Migrate.self]
     )

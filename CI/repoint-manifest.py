@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rewrite a manifest's Flight-Framework URL dependencies to local checkouts.
+"""Rewrite a manifest's Alula-Framework URL dependencies to local checkouts.
 
 Templates and generated projects ship URL dependencies, because that is what a
 downloaded project must contain. Verifying them against working-copy code —
@@ -9,7 +9,7 @@ one.
 
     repoint-manifest.py <Package.swift> <root>
 
-`root` holds the sibling checkouts, so `flight` resolves to `<root>/flight`.
+`root` holds the sibling checkouts, so `alula` resolves to `<root>/alula`.
 
 A dependency whose target directory is missing is a hard error. Leaving the URL
 in place would be worse than failing: the job would resolve the published tag,
@@ -25,7 +25,7 @@ import pathlib
 NESTED = {"hangar": "Hangar/hangar", "swift-changeset": "Data/swift-changeset"}
 
 PATTERN = re.compile(
-    r'\.package\(\s*url:\s*"https://github\.com/Flight-Framework/([a-z-]+)\.git"\s*,([^)]*)\)'
+    r'\.package\(\s*url:\s*"https://github\.com/Alula-Framework/([a-z-]+)\.git"\s*,([^)]*)\)'
 )
 
 
@@ -56,7 +56,7 @@ def main() -> int:
         for entry in missing:
             print(f"    {entry}", file=sys.stderr)
         print(
-            "  Check them out beside this repository, or set FLIGHT_LOCAL=0 to\n"
+            "  Check them out beside this repository, or set ALULA_LOCAL=0 to\n"
             "  verify against the published tags instead.",
             file=sys.stderr,
         )

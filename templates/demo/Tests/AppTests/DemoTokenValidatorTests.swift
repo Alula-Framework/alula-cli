@@ -1,4 +1,4 @@
-import FlightSecurityCore
+import AlulaSecurityCore
 import Testing
 
 @testable import App

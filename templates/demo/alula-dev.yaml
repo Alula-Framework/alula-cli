@@ -1,5 +1,5 @@
-# Loaded on top of flight.yaml when FLIGHT_ENV is `dev`, which is what an
-# unset FLIGHT_ENV means. Nothing in here belongs in production.
+# Loaded on top of alula.yaml when ALULA_ENV is `dev`, which is what an
+# unset ALULA_ENV means. Nothing in here belongs in production.
 
 sessions:
   # The session cookie is `Secure` by default, because it is a bearer

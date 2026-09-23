@@ -1,12 +1,12 @@
 import Foundation
-import FlightChannels
-import FlightChannelsProtocol
-import FlightCore
-import FlightWeb
-import FlightDataCore
-import FlightDataPostgres
-import FlightPresence
-import FlightSecurityCore
+import AlulaChannels
+import AlulaChannelsProtocol
+import AlulaCore
+import AlulaWeb
+import AlulaDataCore
+import AlulaDataPostgres
+import AlulaPresence
+import AlulaSecurityCore
 import PostgresNIO
 import Synchronization
 
@@ -65,12 +65,12 @@ struct ChatController {
     @Inject var chat: ChatRepository
     @Inject var digests: RoomDigestService
 
-    /// Provided by `FlightPresenceModule` and `FlightChannelsModule` rather
+    /// Provided by `AlulaPresenceModule` and `AlulaChannelsModule` rather
     /// than scanned from this target, so they are roots of the graph. The
     /// marker says the scanner is right not to have found them.
-    // flight:hand-registered
+    // alula:hand-registered
     @Inject var presence: any Presence
-    // flight:hand-registered
+    // alula:hand-registered
     @Inject var broadcaster: ChannelBroadcaster
 
     // MARK: Associations
@@ -164,7 +164,7 @@ struct ChatController {
     /// for the whole cluster even though this node only holds some of those
     /// connections. It exists mostly so presence is observable with `curl`:
     /// the real consumers are WebSocket clients, which get a
-    /// `flight:presence_state` on join and `flight:presence_diff`s after.
+    /// `alula:presence_state` on join and `alula:presence_diff`s after.
     @GetRoute("/rooms/:slug/who")
     func who(_ context: RequestContext, slug: String) async throws -> Response {
         let entries = await presence.list(topic: "room:\(slug)")

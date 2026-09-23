@@ -7,7 +7,7 @@ server:
 
 datasource:
   primary:
-    url: "postgres://postgres:flight@127.0.0.1:55432/flight_demo?sslmode=disable"
+    url: "postgres://postgres:alula@127.0.0.1:55432/alula_demo?sslmode=disable"
     pool_size: 5
 
 actuator:
@@ -16,10 +16,10 @@ actuator:
 # Channels: the per-socket outbound queue. When it fills, the OLDEST messages
 # are dropped — a client behind on a realtime feed wants current state, not a
 # backlog it can never catch up on. Drops are counted per socket and logged.
-# Note the `flight.` prefix here, absent from `server`/`datasource`/`actuator`
+# Note the `alula.` prefix here, absent from `server`/`datasource`/`actuator`
 # above: Channels and Presence namespace their keys, the older packages do not.
 # That inconsistency is real and predates this demo.
-flight:
+alula:
   channels:
     outbound-buffer-size: 256
     heartbeat-timeout-seconds: 60
@@ -40,15 +40,15 @@ flight:
 # security:
 #   oidc:
 #     issuer: https://your-tenant.example.com/
-#     audience: flight-demo
+#     audience: alula-demo
 #     roles_claim: realm_access.roles
 #
 # Browser sign-in is the same story. This demo checks passwords itself
-# (FlightPasswordSignInModule over DemoAccountsModule); to sign in through
-# the same provider instead, list FlightOIDCSignInModule in Main.swift in
+# (AlulaPasswordSignInModule over DemoAccountsModule); to sign in through
+# the same provider instead, list AlulaOIDCSignInModule in Main.swift in
 # place of those two and add the client this application is to it:
 #
-#     client-id: flight-demo
+#     client-id: alula-demo
 #     client-secret: "…"                 # omit for a public client
 #     redirect-uri: https://app.example.com/session/callback
 #     post-logout-redirect-uri: https://app.example.com/

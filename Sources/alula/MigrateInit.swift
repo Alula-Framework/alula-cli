@@ -57,11 +57,11 @@ struct MigrateInit {
         print("Added migrations to \(project.root.lastPathComponent):")
         for path in written { print("  \(path)") }
         print("")
-        print("  flight migrate create CreateUsers")
-        print("  FLIGHT_DATABASE_URL=postgres://… flight migrate")
+        print("  alula migrate create CreateUsers")
+        print("  ALULA_DATABASE_URL=postgres://… alula migrate")
     }
 
-    /// Inserts the two targets and, if absent, the flight-data dependency.
+    /// Inserts the two targets and, if absent, the alula-data dependency.
     ///
     /// Editing a manifest textually is unlovely, but the alternative is
     /// parsing Swift to rewrite it, and this insert is anchored to the
@@ -70,14 +70,14 @@ struct MigrateInit {
         let manifestURL = project.root.appendingPathComponent("Package.swift")
         var manifest = project.manifest
 
-        if !manifest.contains("Flight-Framework/flight-data.git") {
+        if !manifest.contains("Alula-Framework/alula-data.git") {
             guard let range = manifest.range(of: "    dependencies: [\n") else {
                 throw CLIError.manifestUnrecognised("no dependencies: [ array")
             }
             manifest.insert(
                 contentsOf: """
-                            .package(url: "https://github.com/Flight-Framework/flight-data.git",
-                                     from: "0.1.2", traits: ["Postgres"]),\n
+                            .package(url: "https://github.com/Alula-Framework/alula-data.git",
+                                     from: "0.11.0", traits: ["Postgres"]),\n
                     """,
                 at: range.upperBound)
         }
@@ -91,7 +91,7 @@ struct MigrateInit {
 
     private static let placeholder = """
         // Migration files land here as <14-digit-UTC-timestamp>_<TypeName>.swift,
-        // written by `flight migrate create <TypeName>`. Files not starting with
+        // written by `alula migrate create <TypeName>`. Files not starting with
         // a timestamp — like this one — are ignored by the discovery plugin.
         //
         // This file exists so the target has a module to build. Deleting it once
@@ -106,14 +106,14 @@ struct MigrateInit {
                 // something you run, not something your server does at boot.
                 .target(
                     name: "Migrations",
-                    dependencies: [.product(name: "FlightMigrate", package: "flight-data")],
-                    plugins: [.plugin(name: "FlightMigratePlugin", package: "flight-data")]
+                    dependencies: [.product(name: "AlulaMigrate", package: "alula-data")],
+                    plugins: [.plugin(name: "AlulaMigratePlugin", package: "alula-data")]
                 ),
                 .executableTarget(
                     name: "migrate",
                     dependencies: [
                         "Migrations",
-                        .product(name: "FlightMigrateCLI", package: "flight-data"),
+                        .product(name: "AlulaMigrateCLI", package: "alula-data"),
                     ]
                 ),
 

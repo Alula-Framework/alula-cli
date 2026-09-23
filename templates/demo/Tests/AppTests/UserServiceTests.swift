@@ -1,5 +1,5 @@
-import FlightCore
-import FlightWebTesting
+import AlulaCore
+import AlulaWebTesting
 import Foundation
 import Testing
 @testable import App

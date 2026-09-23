@@ -12,10 +12,10 @@ enum EmbeddedTemplates {
 // swift-tools-version: 6.3
 import PackageDescription
 
-// A Flight application with a database: everything the skeleton has, plus
+// An Alula application with a database: everything the skeleton has, plus
 // entities, migrations, a repository, and CRUD routes over Postgres.
 //
-// `flight-data` arrives with `traits: ["Postgres"]`. Traits are how a package
+// `alula-data` arrives with `traits: ["Postgres"]`. Traits are how a package
 // carries drivers without imposing them: naming Postgres resolves PostgresNIO
 // and Hangar, and naming no trait at all would resolve neither — you would
 // still get the in-memory cache and the data protocols.
@@ -26,21 +26,21 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.21.2", traits: ["Web"]),
-        .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.7.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.36.0", traits: ["Web"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.11.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
             name: "App",
             dependencies: [
-                .product(name: "FlightCore", package: "flight"),
-                .product(name: "FlightWeb", package: "flight"),
-                .product(name: "FlightTransport", package: "flight"),
-                .product(name: "FlightActuator", package: "flight"),
-                .product(name: "FlightDataPostgres", package: "flight-data"),
+                .product(name: "AlulaCore", package: "alula"),
+                .product(name: "AlulaWeb", package: "alula"),
+                .product(name: "AlulaTransport", package: "alula"),
+                .product(name: "AlulaActuator", package: "alula"),
+                .product(name: "AlulaDataPostgres", package: "alula-data"),
             ],
             plugins: [
-                .plugin(name: "FlightRegistrationPlugin", package: "flight")
+                .plugin(name: "AlulaRegistrationPlugin", package: "alula")
             ]
         ),
 
@@ -50,8 +50,8 @@ let package = Package(
         // something you run, not something your server does at boot.
         .target(
             name: "Migrations",
-            dependencies: [.product(name: "FlightMigrate", package: "flight-data")],
-            plugins: [.plugin(name: "FlightMigratePlugin", package: "flight-data")]
+            dependencies: [.product(name: "AlulaMigrate", package: "alula-data")],
+            plugins: [.plugin(name: "AlulaMigratePlugin", package: "alula-data")]
         ),
 
         // `swift run migrate status | up | down | create`.
@@ -59,7 +59,7 @@ let package = Package(
             name: "migrate",
             dependencies: [
                 "Migrations",
-                .product(name: "FlightMigrateCLI", package: "flight-data"),
+                .product(name: "AlulaMigrateCLI", package: "alula-data"),
             ]
         ),
 
@@ -67,10 +67,10 @@ let package = Package(
             name: "AppTests",
             dependencies: [
                 "App",
-                .product(name: "FlightCore", package: "flight"),
-                .product(name: "FlightWeb", package: "flight"),
-                .product(name: "FlightWebTesting", package: "flight"),
-                .product(name: "FlightDataPostgres", package: "flight-data"),
+                .product(name: "AlulaCore", package: "alula"),
+                .product(name: "AlulaWeb", package: "alula"),
+                .product(name: "AlulaWebTesting", package: "alula"),
+                .product(name: "AlulaDataPostgres", package: "alula-data"),
             ]
         ),
     ]
@@ -78,8 +78,8 @@ let package = Package(
 
 """#,
             "Sources/App/Controllers/HealthController.swift": #"""
-import FlightCore
-import FlightWeb
+import AlulaCore
+import AlulaWeb
 
 /// The one route this tier ships, so there is something to curl before you
 /// have written anything.
@@ -89,7 +89,7 @@ import FlightWeb
 @Controller
 struct HealthController {
 
-    /// Reads a key from `flight.yaml`. With no `default:`, the build plugin
+    /// Reads a key from `alula.yaml`. With no `default:`, the build plugin
     /// verifies the key exists — misspell it and the build fails, naming it.
     @ConfigValue("app.name") var appName: String
 
@@ -101,9 +101,9 @@ struct HealthController {
 
 """#,
             "Sources/App/Controllers/UserController.swift": #"""
-import FlightCore
-import FlightDataCore
-import FlightWeb
+import AlulaCore
+import AlulaDataCore
+import AlulaWeb
 import Foundation
 
 struct CreateUserRequest: Codable {
@@ -167,8 +167,8 @@ struct UserController {
 
 """#,
             "Sources/App/Entities/User.swift": #"""
-import FlightDataPostgres
-import FlightWeb
+import AlulaDataPostgres
+import AlulaWeb
 import Foundation
 
 /// A row, as a Swift value.
@@ -189,11 +189,11 @@ struct User: Encodable, Equatable, Sendable, ResponseEncodable {
 
 """#,
             "Sources/App/Main.swift": #"""
-import FlightActuator
-import FlightCore
-import FlightDataPostgres
-import FlightTransport
-import FlightWeb
+import AlulaActuator
+import AlulaCore
+import AlulaDataPostgres
+import AlulaTransport
+import AlulaWeb
 
 /// Your application's module: one place that says what this app is made of.
 ///
@@ -202,10 +202,10 @@ import FlightWeb
 /// plugin scans, including the binding from `(any UserRepositoryProtocol)` to
 /// its one conformer — is wired by the generated composition root, so adding a
 /// controller does not mean editing this file.
-struct AppModule: FlightModule {
+struct AppModule: AlulaModule {
     /// Modules that must be built before this one. The list is a DAG resolved
     /// once at bootstrap, so ordering is checked rather than hoped for.
-    static var dependencies: [any FlightModule.Type] {
+    static var dependencies: [any AlulaModule.Type] {
         [PostgresDataModule<PrimaryDataSource>.self]
     }
 }
@@ -218,15 +218,15 @@ struct Main {
         // the server start accepting requests. Nothing serves traffic against
         // a half-built graph.
         //
-        // `Flight.run` rather than `main() async throws`: an error escaping
+        // `Alula.run` rather than `main() async throws`: an error escaping
         // `main` is reported by the Swift runtime as "Fatal error: Error
         // raised at top level" followed by a register dump and a backtrace —
         // which is what a new project sees when Postgres is not running or
         // the port is already bound. `run` prints the reason and exits 1.
-        await Flight.run(
+        await Alula.run(
             configuration: try Configuration.load(),
             modules: [
-                FlightWebModule<FlightTransport>.self,
+                AlulaWebModule<AlulaTransport>.self,
                 AppModule.self,
                 ActuatorModule.self,
             ],
@@ -236,14 +236,14 @@ struct Main {
             // composer that builds them in dependency order, which is what
             // lets a module take what it needs as initializer parameters.
             // It is required — there is no path without it.
-            composedBy: flightComposeModules
+            composedBy: alulaComposeModules
         )
     }
 }
 
 """#,
             "Sources/App/Repos/UserRepository.swift": #"""
-import FlightDataPostgres
+import AlulaDataPostgres
 import Foundation
 
 /// Data access.
@@ -260,10 +260,10 @@ import Foundation
 struct UserRepository: UserRepositoryProtocol {
     /// The pool, registered by `PostgresDataModule<PrimaryDataSource>`.
     ///
-    /// `flight:hand-registered` tells the registration generator that this
+    /// `alula:hand-registered` tells the registration generator that this
     /// type is registered by a module rather than scanned from this target,
     /// so it does not warn about a component it cannot see.
-    // flight:hand-registered — PostgresDataModule registers the pool.
+    // alula:hand-registered — PostgresDataModule registers the pool.
     @Inject var pool: PostgresDataSource
 
     func all() async throws -> [User] {
@@ -295,7 +295,7 @@ struct UserRepository: UserRepositoryProtocol {
 
 """#,
             "Sources/App/Repos/UserRepositoryProtocol.swift": #"""
-import FlightDataPostgres
+import AlulaDataPostgres
 import Foundation
 
 /// The seam the rest of the application depends on instead of the concrete,
@@ -317,7 +317,7 @@ protocol UserRepositoryProtocol: Sendable {
 
 """#,
             "Sources/Migrations/20260101000000_CreateUsers.swift": #"""
-import FlightMigrate
+import AlulaMigrate
 import Foundation
 
 /// Migrations are ordinary Swift, discovered at build time by their filename
@@ -352,14 +352,14 @@ struct CreateUsers: Migration {
 
 """#,
             "Sources/migrate/Migrate.swift": #"""
-import FlightMigrate
-import FlightMigrateCLI
+import AlulaMigrate
+import AlulaMigrateCLI
 import Migrations
 
 /// The whole migration CLI. `_allMigrations()` is generated at build time
 /// from the files in Sources/Migrations.
 ///
-///     FLIGHT_DATABASE_URL=postgres://… swift run migrate status
+///     ALULA_DATABASE_URL=postgres://… swift run migrate status
 @main
 struct Migrate: MigrateTool {
     static var migrations: [MigrationEntry] { _allMigrations() }
@@ -367,10 +367,10 @@ struct Migrate: MigrateTool {
 
 """#,
             "Tests/AppTests/HealthControllerTests.swift": #"""
-import FlightCore
-import FlightDataPostgres
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaDataPostgres
+import AlulaWeb
+import AlulaWebTesting
 import Testing
 
 @testable import App
@@ -395,11 +395,11 @@ struct HealthControllerTests {
         // The composition root's sequence, by hand: the pool is a graph root,
         // the graph is built from it, and AppModule registers from the graph.
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
-        let graph = try FlightGraph(
+        let graph = try AlulaGraph(
             configuration: configuration, postgresDataSource: postgres.dataSource)
-        // Routes are values the composition root hands to `FlightWebModule`,
+        // Routes are values the composition root hands to `AlulaWebModule`,
         // so a client that serves them is built from the same graph.
-        let client = try TestClient(routes: flightRoutes(graph))
+        let client = try TestClient(routes: alulaRoutes(graph))
 
         let response = await client.get("/")
 
@@ -454,9 +454,9 @@ let ada = User(
 
 """#,
             "Tests/AppTests/UserControllerTests.swift": #"""
-import FlightCore
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaWeb
+import AlulaWebTesting
 import Foundation
 import Testing
 
@@ -554,11 +554,11 @@ struct UserControllerTests {
 struct UserRoutesEndToEndTests {
 
     private func client(_ users: InMemoryUsers = InMemoryUsers([ada])) throws -> TestClient {
-        // `flightRoutes` is generated alongside the per-route factories and
+        // `alulaRoutes` is generated alongside the per-route factories and
         // returns all of them, so nothing here names a route by position — add
         // a route to the controller and this keeps working unchanged.
         return try TestClient(
-            routes: UserController.flightRoutes { _ in UserController(users: users) })
+            routes: UserController.alulaRoutes { _ in UserController(users: users) })
     }
 
     /// Status, headers and body shape — the three things a client actually
@@ -622,13 +622,33 @@ private struct UserPayload: Decodable {
 }
 
 """#,
+            "alula.yaml": #"""
+app:
+  name: App
+
+server:
+  host: 127.0.0.1
+  port: 8080
+
+# The connection pool. Every request that touches a repository holds one
+# connection for the life of that request, so `pool_size` is a ceiling on
+# concurrent database-touching requests, not a suggestion.
+datasource:
+  primary:
+    url: "postgres://postgres:alula@127.0.0.1:55432/app_dev?sslmode=disable"
+    pool_size: 5
+
+actuator:
+  format: json
+
+"""#,
             "docker-compose.yml": #"""
 # The database this project expects, in one command:
 #
 #     docker compose up -d
 #
 # The credentials, port and database name below match `datasource.primary.url`
-# in flight.yaml exactly, so `swift run` works immediately after this comes up
+# in alula.yaml exactly, so `swift run` works immediately after this comes up
 # with nothing else to configure.
 #
 # Port 55432, not 5432, deliberately: a Postgres already installed on the host
@@ -640,7 +660,7 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_PASSWORD: flight
+      POSTGRES_PASSWORD: alula
       POSTGRES_DB: app_dev
     ports:
       - '127.0.0.1:55432:5432'
@@ -671,32 +691,12 @@ volumes:
 #
 # then point the tests at it, e.g.
 #
-#     export DATABASE_URL="postgres://postgres:flight@127.0.0.1:55432/app_test?sslmode=disable"
+#     export DATABASE_URL="postgres://postgres:alula@127.0.0.1:55432/app_test?sslmode=disable"
 #
 # The tests this project ships need no database at all — they construct
 # controllers with mocked repositories and assert on what the method returns.
 # That is the tier most tests belong in. A database is needed only for the
 # smaller tier that exercises real SQL.
-
-"""#,
-            "flight.yaml": #"""
-app:
-  name: App
-
-server:
-  host: 127.0.0.1
-  port: 8080
-
-# The connection pool. Every request that touches a repository holds one
-# connection for the life of that request, so `pool_size` is a ceiling on
-# concurrent database-touching requests, not a suggestion.
-datasource:
-  primary:
-    url: "postgres://postgres:flight@127.0.0.1:55432/app_dev?sslmode=disable"
-    pool_size: 5
-
-actuator:
-  format: json
 
 """#,
         ],
@@ -716,10 +716,10 @@ DerivedData/
 // swift-tools-version: 6.3
 import PackageDescription
 
-// The Flight demo: one application exercising the whole ecosystem.
+// The Alula demo: one application exercising the whole ecosystem.
 //
-// Two package dependencies, not eight. `flight` carries the framework and the
-// layers on top of it; `flight-data` carries persistence and caching, with the
+// Two package dependencies, not eight. `alula` carries the framework and the
+// layers on top of it; `alula-data` carries persistence and caching, with the
 // Postgres driver requested by trait. Everything below is a product of one of
 // those two.
 let package = Package(
@@ -731,48 +731,48 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.35.0", traits: ["Security"]),
-        .package(url: "https://github.com/Flight-Framework/flight-data.git", from: "0.9.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.36.0", traits: ["Security"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.11.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
             name: "App",
             dependencies: [
-                .product(name: "FlightCore", package: "flight"),
-                .product(name: "FlightWeb", package: "flight"),
-                .product(name: "FlightTransport", package: "flight"),
-                .product(name: "FlightActuator", package: "flight"),
-                .product(name: "FlightScheduler", package: "flight"),
-                .product(name: "FlightSecurityCore", package: "flight"),
-                .product(name: "FlightPubSub", package: "flight"),
-                .product(name: "FlightRateLimit", package: "flight"),
-                .product(name: "FlightChannels", package: "flight"),
-                .product(name: "FlightChannelsProtocol", package: "flight"),
-                .product(name: "FlightPresence", package: "flight"),
-                .product(name: "FlightDataPostgres", package: "flight-data"),
-                .product(name: "FlightMigrate", package: "flight-data"),
-                .product(name: "FlightSchedulerPostgres", package: "flight-data"),
-                .product(name: "FlightCache", package: "flight-data"),
+                .product(name: "AlulaCore", package: "alula"),
+                .product(name: "AlulaWeb", package: "alula"),
+                .product(name: "AlulaTransport", package: "alula"),
+                .product(name: "AlulaActuator", package: "alula"),
+                .product(name: "AlulaScheduler", package: "alula"),
+                .product(name: "AlulaSecurityCore", package: "alula"),
+                .product(name: "AlulaPubSub", package: "alula"),
+                .product(name: "AlulaRateLimit", package: "alula"),
+                .product(name: "AlulaChannels", package: "alula"),
+                .product(name: "AlulaChannelsProtocol", package: "alula"),
+                .product(name: "AlulaPresence", package: "alula"),
+                .product(name: "AlulaDataPostgres", package: "alula-data"),
+                .product(name: "AlulaMigrate", package: "alula-data"),
+                .product(name: "AlulaSchedulerPostgres", package: "alula-data"),
+                .product(name: "AlulaCache", package: "alula-data"),
             ],
             plugins: [
-                .plugin(name: "FlightRegistrationPlugin", package: "flight")
+                .plugin(name: "AlulaRegistrationPlugin", package: "alula")
             ]
         ),
 
-        // Migration files live in their own target so FlightMigratePlugin can
+        // Migration files live in their own target so AlulaMigratePlugin can
         // scan them and generate the _allMigrations() registry at build time.
         // The app target does NOT depend on this — migrations never run at boot.
         .target(
             name: "Migrations",
-            dependencies: [.product(name: "FlightMigrate", package: "flight-data")],
-            plugins: [.plugin(name: "FlightMigratePlugin", package: "flight-data")]
+            dependencies: [.product(name: "AlulaMigrate", package: "alula-data")],
+            plugins: [.plugin(name: "AlulaMigratePlugin", package: "alula-data")]
         ),
 
         .executableTarget(
             name: "migrate",
             dependencies: [
                 "Migrations",
-                .product(name: "FlightMigrateCLI", package: "flight-data"),
+                .product(name: "AlulaMigrateCLI", package: "alula-data"),
             ]
         ),
 
@@ -780,19 +780,19 @@ let package = Package(
             name: "AppTests",
             dependencies: [
                 "App",
-                .product(name: "FlightCore", package: "flight"),
-                .product(name: "FlightWeb", package: "flight"),
-                .product(name: "FlightWebTesting", package: "flight"),
-                .product(name: "FlightSessionsTesting", package: "flight"),
-                .product(name: "FlightRateLimitTesting", package: "flight"),
-                .product(name: "FlightChannels", package: "flight"),
-                .product(name: "FlightChannelsTesting", package: "flight"),
-                .product(name: "FlightChannelsClient", package: "flight"),
-                .product(name: "FlightPresence", package: "flight"),
-                .product(name: "FlightPresenceClient", package: "flight"),
-                .product(name: "FlightPubSubTesting", package: "flight"),
-                .product(name: "FlightDataPostgres", package: "flight-data"),
-                .product(name: "FlightCache", package: "flight-data"),
+                .product(name: "AlulaCore", package: "alula"),
+                .product(name: "AlulaWeb", package: "alula"),
+                .product(name: "AlulaWebTesting", package: "alula"),
+                .product(name: "AlulaSessionsTesting", package: "alula"),
+                .product(name: "AlulaRateLimitTesting", package: "alula"),
+                .product(name: "AlulaChannels", package: "alula"),
+                .product(name: "AlulaChannelsTesting", package: "alula"),
+                .product(name: "AlulaChannelsClient", package: "alula"),
+                .product(name: "AlulaPresence", package: "alula"),
+                .product(name: "AlulaPresenceClient", package: "alula"),
+                .product(name: "AlulaPubSubTesting", package: "alula"),
+                .product(name: "AlulaDataPostgres", package: "alula-data"),
+                .product(name: "AlulaCache", package: "alula-data"),
             ]
         ),
     ]
@@ -800,11 +800,11 @@ let package = Package(
 
 """#,
             "Sources/App/Channels/RoomChannel.swift": #"""
-import FlightChannels
-import FlightChannelsProtocol
-import FlightCore
-import FlightPresence
-import FlightWeb
+import AlulaChannels
+import AlulaChannelsProtocol
+import AlulaCore
+import AlulaPresence
+import AlulaWeb
 import Foundation
 
 /// The live half of the chat room: `ChatController` is its history, this is
@@ -983,11 +983,11 @@ struct RoomChannel: Channel {
 
 """#,
             "Sources/App/Controllers/AttachmentController.swift": #"""
-import FlightCore
-import FlightWeb
+import AlulaCore
+import AlulaWeb
 import Foundation
 
-/// File upload, both halves of flight 0.7.0 at once: the handler takes
+/// File upload, both halves of alula 0.7.0 at once: the handler takes
 /// `body: RequestBodyStream`, so the transport hands bytes through as they
 /// arrive instead of buffering the request — that (plus `maxBodyBytes:`
 /// overriding the global cap for just this route) is what lets an upload
@@ -1047,14 +1047,14 @@ struct AttachmentController {
 """#,
             "Sources/App/Controllers/ChatController.swift": #"""
 import Foundation
-import FlightChannels
-import FlightChannelsProtocol
-import FlightCore
-import FlightWeb
-import FlightDataCore
-import FlightDataPostgres
-import FlightPresence
-import FlightSecurityCore
+import AlulaChannels
+import AlulaChannelsProtocol
+import AlulaCore
+import AlulaWeb
+import AlulaDataCore
+import AlulaDataPostgres
+import AlulaPresence
+import AlulaSecurityCore
 import PostgresNIO
 import Synchronization
 
@@ -1113,12 +1113,12 @@ struct ChatController {
     @Inject var chat: ChatRepository
     @Inject var digests: RoomDigestService
 
-    /// Provided by `FlightPresenceModule` and `FlightChannelsModule` rather
+    /// Provided by `AlulaPresenceModule` and `AlulaChannelsModule` rather
     /// than scanned from this target, so they are roots of the graph. The
     /// marker says the scanner is right not to have found them.
-    // flight:hand-registered
+    // alula:hand-registered
     @Inject var presence: any Presence
-    // flight:hand-registered
+    // alula:hand-registered
     @Inject var broadcaster: ChannelBroadcaster
 
     // MARK: Associations
@@ -1212,7 +1212,7 @@ struct ChatController {
     /// for the whole cluster even though this node only holds some of those
     /// connections. It exists mostly so presence is observable with `curl`:
     /// the real consumers are WebSocket clients, which get a
-    /// `flight:presence_state` on join and `flight:presence_diff`s after.
+    /// `alula:presence_state` on join and `alula:presence_diff`s after.
     @GetRoute("/rooms/:slug/who")
     func who(_ context: RequestContext, slug: String) async throws -> Response {
         let entries = await presence.list(topic: "room:\(slug)")
@@ -1405,8 +1405,8 @@ extension ChatError {
 
 """#,
             "Sources/App/Controllers/HealthController.swift": #"""
-import FlightCore
-import FlightWeb
+import AlulaCore
+import AlulaWeb
 
 /// The one route this tier ships, so there is something to curl before you
 /// have written anything.
@@ -1416,7 +1416,7 @@ import FlightWeb
 @Controller
 struct HealthController {
 
-    /// Reads a key from `flight.yaml`. With no `default:`, the build plugin
+    /// Reads a key from `alula.yaml`. With no `default:`, the build plugin
     /// verifies the key exists — misspell it and the build fails, naming it.
     @ConfigValue("app.name") var appName: String
 
@@ -1438,9 +1438,9 @@ struct HealthController {
 
 """#,
             "Sources/App/Controllers/SessionController.swift": #"""
-import FlightCore
-import FlightSecurityCore
-import FlightWeb
+import AlulaCore
+import AlulaSecurityCore
+import AlulaWeb
 
 /// Signing in with a cookie instead of a header — written against
 /// `SignInProvider`, so it does not know who checks the password.
@@ -1450,9 +1450,9 @@ import FlightWeb
 /// does. A browser does not: it signs in once and expects a cookie to
 /// remember the answer. This controller is that once.
 ///
-/// Today the provider is `FlightPasswordSignInModule`'s, over the accounts
+/// Today the provider is `AlulaPasswordSignInModule`'s, over the accounts
 /// `DemoAccountsModule` holds. Swapping that one line in `Main.swift` for
-/// `FlightOIDCSignInModule.self`, plus a `security.oidc` block, moves this
+/// `AlulaOIDCSignInModule.self`, plus a `security.oidc` block, moves this
 /// demo onto Keycloak or any OpenID Connect provider — and nothing below
 /// changes. `begin` answers with a form today and a redirect then; the
 /// callback route is already here for it.
@@ -1479,8 +1479,8 @@ import FlightWeb
 @Controller("/session")
 struct SessionController {
     /// Whichever sign-in module is listed provides it.
-    // flight:hand-registered — a value FlightPasswordSignInModule (or
-    // FlightOIDCSignInModule) holds, not a scanned component.
+    // alula:hand-registered — a value AlulaPasswordSignInModule (or
+    // AlulaOIDCSignInModule) holds, not a scanned component.
     @Inject var provider: any SignInProvider
 
     /// What `GET /csrf` answers: the token a browser sends back on
@@ -1555,10 +1555,10 @@ struct SessionController {
 
 """#,
             "Sources/App/Controllers/SocketController.swift": #"""
-import FlightChannels
-import FlightCore
-import FlightSecurityCore
-import FlightWeb
+import AlulaChannels
+import AlulaCore
+import AlulaSecurityCore
+import AlulaWeb
 
 /// The WebSocket entry point, as a route like any other.
 ///
@@ -1584,14 +1584,14 @@ struct SocketController {
     /// correctly: the scanner can't see a module-provided value, so an unmarked
     /// @Inject of a type it never found as a @Component is usually a missing
     /// dependency that would fail composition.
-    // flight:hand-registered
+    // alula:hand-registered
     @Inject var validator: any TokenValidator
 
     /// The channels stack, injected as one value. It used to be built with
     /// `ChannelSocketHandler(context:)`, which resolved the router, the bus
     /// and the channels configuration out of every upgrade request — three
     /// lookups of things the composition root wired at start-up.
-    // flight:hand-registered
+    // alula:hand-registered
     @Inject var sockets: ChannelSockets
 
     /// The upgrade request is where identity is established — before the
@@ -1612,9 +1612,9 @@ struct SocketController {
 """#,
             "Sources/App/Controllers/UserController.swift": #"""
 import Foundation
-import FlightCore
-import FlightWeb
-import FlightDataCore
+import AlulaCore
+import AlulaWeb
+import AlulaDataCore
 
 struct CreateUserRequest: Codable {
     let name: String
@@ -1683,8 +1683,8 @@ struct UserController {
 
 """#,
             "Sources/App/Controllers/VisitsController.swift": #"""
-import FlightCore
-import FlightWeb
+import AlulaCore
+import AlulaWeb
 
 /// The room a browser last opened, remembered in its session.
 ///
@@ -1732,8 +1732,8 @@ struct VisitsController {
 """#,
             "Sources/App/Entities/Message.swift": #"""
 import Foundation
-import FlightDataPostgres
-import FlightWeb
+import AlulaDataPostgres
+import AlulaWeb
 
 /// A chat message, and the demo's most heavily-related entity: it belongs to
 /// a room, optionally belongs to an author and to a parent message, and
@@ -1795,8 +1795,8 @@ extension ChatMessage: DynamicallyFilterable {
 """#,
             "Sources/App/Entities/Room.swift": #"""
 import Foundation
-import FlightDataPostgres
-import FlightWeb
+import AlulaDataPostgres
+import AlulaWeb
 
 /// A chat room. The parent side of the demo's one-to-many: one room, many
 /// messages, reached with `.preload(\.messages)`.
@@ -1819,8 +1819,8 @@ struct Room: Encodable, Equatable, Sendable, ResponseEncodable {
 """#,
             "Sources/App/Entities/Topic.swift": #"""
 import Foundation
-import FlightDataPostgres
-import FlightWeb
+import AlulaDataPostgres
+import AlulaWeb
 
 /// A tag a message can carry. Reached from `ChatMessage` through
 /// `MessageTopic` — a many-to-many, which Hangar preloads as two batched
@@ -1843,8 +1843,8 @@ struct MessageTopic: Codable, Equatable, Sendable {
 """#,
             "Sources/App/Entities/User.swift": #"""
 import Foundation
-import FlightDataPostgres
-import FlightWeb
+import AlulaDataPostgres
+import AlulaWeb
 
 // MARK: - Entities (Hangar @Entity — hangar-design §4)
 
@@ -1870,8 +1870,8 @@ struct User: Encodable, Equatable, Sendable, ResponseEncodable {
 
 """#,
             "Sources/App/Jobs/ChatJobs.swift": #"""
-import FlightCore
-import FlightScheduler
+import AlulaCore
+import AlulaScheduler
 import Foundation
 
 /// Scheduled work, as methods.
@@ -1895,7 +1895,7 @@ struct ChatJobs {
     /// without thinking about it.
     ///
     /// Running once across several servers needs a `JobCoordinator` —
-    /// `FlightSchedulerPostgres` provides one. Without it the scheduler warns
+    /// `AlulaSchedulerPostgres` provides one. Without it the scheduler warns
     /// at startup rather than silently running this on every server, which is
     /// the kind of failure you would otherwise discover from the data.
     @Scheduled("0 0 3 * * *", timeZone: "UTC")
@@ -1913,7 +1913,7 @@ struct ChatJobs {
     /// leaves every other server cold. This is work that is per-process by
     /// nature, and saying so is the whole distinction.
     ///
-    /// Swap `FlightCacheModule` for the Valkey-backed one and this becomes
+    /// Swap `AlulaCacheModule` for the Valkey-backed one and this becomes
     /// the wrong annotation — a shared cache only needs warming once. Where
     /// the state lives is what decides which of the two a job is.
     @Scheduled(every: .minutes(1), initialDelay: .seconds(5), onEveryNode: true)
@@ -1924,28 +1924,28 @@ struct ChatJobs {
 
 """#,
             "Sources/App/Main.swift": #"""
-import FlightActuator
-import FlightCache
-import FlightChannels
-import FlightCore
-import FlightDataPostgres
-import FlightPresence
-import FlightPubSub
-import FlightRateLimit
-import FlightScheduler
-import FlightSchedulerPostgres
-import FlightSecurityCore
-import FlightTransport
-import FlightWeb
+import AlulaActuator
+import AlulaCache
+import AlulaChannels
+import AlulaCore
+import AlulaDataPostgres
+import AlulaPresence
+import AlulaPubSub
+import AlulaRateLimit
+import AlulaScheduler
+import AlulaSchedulerPostgres
+import AlulaSecurityCore
+import AlulaTransport
+import AlulaWeb
 
-/// Flight Security's `Principal` and Flight Channels' `ChannelPrincipal` are
+/// Alula Security's `Principal` and Alula Channels' `ChannelPrincipal` are
 /// deliberately unrelated: Channels has no dependency on Security, so a
 /// WebSocket layer can be used with any notion of identity — or none. The two
 /// meet in application code, which is here, and the conformance is empty
 /// because `Principal` already has everything the protocol asks for.
 extension Principal: @retroactive ChannelPrincipal {}
 
-/// The bring-your-own-auth seam: `FlightSecurityModule` wires the
+/// The bring-your-own-auth seam: `AlulaSecurityModule` wires the
 /// authentication machinery but supplies no validator, so this is the choice.
 ///
 /// Its own module because the validator is a *root* of the component graph —
@@ -1954,38 +1954,38 @@ extension Principal: @retroactive ChannelPrincipal {}
 /// of its roots would be a composition cycle, which the build would refuse by
 /// name. Separating them says the true thing anyway: choosing how tokens are
 /// validated is a deployment decision, and a real one deletes this and lists
-/// `FlightOIDCModule` instead, configured through `security.oidc.*`.
-struct DemoAuthModule: FlightModule {
-    /// Provided as a value; the composer matches it to `FlightSecurityModule`'s
+/// `AlulaOIDCModule` instead, configured through `security.oidc.*`.
+struct DemoAuthModule: AlulaModule {
+    /// Provided as a value; the composer matches it to `AlulaSecurityModule`'s
     /// `validator:` by type. It used to be a container registration the
     /// security module looked up.
     let tokenValidator: any TokenValidator = DemoTokenValidator()
 }
 
-struct AppModule: FlightModule {
-    static var dependencies: [any FlightModule.Type] {
+struct AppModule: AlulaModule {
+    static var dependencies: [any AlulaModule.Type] {
         [
             PostgresDataModule<PrimaryDataSource>.self,
-            FlightPubSubModule.self,
-            FlightPresenceModule.self,
-            FlightCacheModule.self,
-            FlightSchedulerModule.self,
+            AlulaPubSubModule.self,
+            AlulaPresenceModule.self,
+            AlulaCacheModule.self,
+            AlulaSchedulerModule.self,
             // Authentication wiring — the request-scoped principal and the
             // `Authentication` middleware. It registers no validator: how
             // tokens are validated is chosen by listing a module
-            // (`FlightOIDCModule`) or registering `(any TokenValidator)`
+            // (`AlulaOIDCModule`) or registering `(any TokenValidator)`
             // yourself, as this application does below. Order does not
             // matter, which is why this can simply be a dependency.
-            FlightSecurityModule.self,
+            AlulaSecurityModule.self,
             // Sessions: a cookie-keyed record per browser, loaded ahead of
             // every request and persisted after it. In-memory here, which is
-            // right for one process; `FlightSessionsValkeyModule` from
-            // flight-data makes it shared when there are more.
-            FlightSessionsModule.self,
+            // right for one process; `AlulaSessionsValkeyModule` from
+            // alula-data makes it shared when there are more.
+            AlulaSessionsModule.self,
             // Rate limiting. Same story about one process:
-            // `FlightRateLimitValkeyModule` makes a quota mean one thing
+            // `AlulaRateLimitValkeyModule` makes a quota mean one thing
             // across every replica instead of one thing per replica.
-            FlightRateLimitModule.self,
+            AlulaRateLimitModule.self,
         ]
     }
 
@@ -1993,7 +1993,7 @@ struct AppModule: FlightModule {
     /// constructed from the container at `freeze()`; the graph's roots are
     /// things modules provide, so the place that assembles the modules is the
     /// place that can build it.
-    let graph: FlightGraph
+    let graph: AlulaGraph
 
     /// Makes `.once` mean once across every server rather than once per
     /// server. This demo runs one process, where the coordinator changes
@@ -2001,25 +2001,25 @@ struct AppModule: FlightModule {
     /// job that is safe to scale and one that is not, and the scheduler warns
     /// at startup when it is missing.
     ///
-    /// A value the composition root hands to `FlightSchedulerModule` (matched
+    /// A value the composition root hands to `AlulaSchedulerModule` (matched
     /// by type). It used to be a container registration the scheduler looked
     /// up, which meant a deployment that forgot it degraded silently.
     let jobCoordinator: any JobCoordinator
 
     /// What a pool exhaustion, an invalid changeset or a bad dynamic filter
-    /// look like on the wire, handed to `FlightWebModule` (matched by type).
+    /// look like on the wire, handed to `AlulaWebModule` (matched by type).
     /// See Web/ErrorMapping.swift for why this cannot be a middleware.
     let errorMapper: ErrorMapper
 
     /// The application's default-lane middleware, outermost first — the value
     /// form of `container.pipeline { }`. RequestLogging sees the true
-    /// wall-clock time of everything below it. Handed to `FlightWebModule`,
+    /// wall-clock time of everything below it. Handed to `AlulaWebModule`,
     /// which the composer aggregates middleware into.
     let middleware: [MiddlewareRegistration]
 
-    /// `RateLimiter` comes from `FlightRateLimitModule`, matched by type in
+    /// `RateLimiter` comes from `AlulaRateLimitModule`, matched by type in
     /// composition the way every other value a module takes is.
-    init(graph: FlightGraph, limiter: RateLimiter) {
+    init(graph: AlulaGraph, limiter: RateLimiter) {
         self.graph = graph
         self.jobCoordinator = PostgresJobCoordinator(dataSource: graph.postgresDataSource)
         self.errorMapper = AppErrorMapping.mapper()
@@ -2042,11 +2042,11 @@ struct AppModule: FlightModule {
                 // no proxy configured, so it is the loopback address that
                 // connects to it; a deployment behind one sets
                 // `web.trusted-proxies` in its own environment's
-                // flight-*.yaml, and nothing here changes.
+                // alula-*.yaml, and nothing here changes.
                 //
                 // This runs after `Authentication`, which is why reading the
                 // principal works: `AppModule` depends on
-                // `FlightSecurityModule`, and lane order follows the module
+                // `AlulaSecurityModule`, and lane order follows the module
                 // graph. Reverse that dependency and this would silently see
                 // `nil` on every request and limit the whole world as one
                 // caller.
@@ -2073,32 +2073,32 @@ struct AppModule: FlightModule {
 
     // The socket route itself is `SocketController`, declared with
     // `@WebSocketRoute`; the app's controllers become routes through the
-    // generated `flightRoutes(graph)`, not a registration here.
+    // generated `alulaRoutes(graph)`, not a registration here.
 }
 
 @main
 struct Main {
     static func main() async {
-        // Configuration loads first (flight.yaml + FLIGHT_* env), then the
+        // Configuration loads first (alula.yaml + ALULA_* env), then the
         // modules are composed in dependency order, every component is built
         // once, the ServiceGroup starts, and only then does request serving
         // begin — never against a half-built graph.
         //
-        // `Flight.run` rather than `main() async throws`: an error escaping
+        // `Alula.run` rather than `main() async throws`: an error escaping
         // `main` is reported by the Swift runtime as "Fatal error: Error
         // raised at top level" followed by a register dump and a backtrace —
         // which is what a new project sees when Postgres is not running or
         // the port is already bound. `run` prints the reason and exits 1.
-        await Flight.run(
+        await Alula.run(
             configuration: try Configuration.load(),
             modules: [
-                FlightWebModule<FlightTransport>.self,  // choosing a transport = choosing a module
+                AlulaWebModule<AlulaTransport>.self,  // choosing a transport = choosing a module
                 DemoAuthModule.self,
                 // Browser sign-in against the demo's own accounts. Swap for
-                // `FlightOIDCSignInModule.self` and add a `security.oidc`
+                // `AlulaOIDCSignInModule.self` and add a `security.oidc`
                 // block to sign in through Keycloak or any OpenID Connect
                 // provider instead; SessionController does not change.
-                FlightPasswordSignInModule.self,
+                AlulaPasswordSignInModule.self,
                 DemoAccountsModule.self,
                 DemoChannelsModule.self,
                 AppModule.self,
@@ -2110,7 +2110,7 @@ struct Main {
             // composer that builds them in dependency order, which is what
             // lets a module take what it needs as initializer parameters.
             // It is required — there is no path without it.
-            composedBy: flightComposeModules
+            composedBy: alulaComposeModules
         )
     }
 }
@@ -2122,8 +2122,8 @@ struct Main {
 /// and a module that *provides* a graph root cannot also *take* the graph.
 /// `AppModule` takes it, so the channels move here. The build refuses the
 /// alternative by name, listing the cycle.
-struct DemoChannelsModule: FlightModule {
-    static var dependencies: [any FlightModule.Type] { [FlightChannelsModule.self] }
+struct DemoChannelsModule: AlulaModule {
+    static var dependencies: [any AlulaModule.Type] { [AlulaChannelsModule.self] }
 
     /// Everything a room channel needs, closed over rather than looked up.
     ///
@@ -2133,9 +2133,9 @@ struct DemoChannelsModule: FlightModule {
     /// on the graph. Without that split this module could not exist.
     /// Inputs, not outputs — deliberately not stored. A stored `presence`
     /// would make this module *provide* `any Presence` alongside
-    /// `FlightPresenceModule`, and the build refuses that ambiguity by name.
+    /// `AlulaPresenceModule`, and the build refuses that ambiguity by name.
     /// What this module provides is `channels`.
-    init(graph: FlightGraph, presence: any Presence) {
+    init(graph: AlulaGraph, presence: any Presence) {
         let chat = graph.chatRepository
         let digests = graph.roomDigestService
         self.channels = [
@@ -2162,15 +2162,15 @@ struct DemoChannelsModule: FlightModule {
     /// duplicate pattern fails composition rather than a join.
     ///
     /// The composer collects `channels` from every module that declares any
-    /// and hands them to `FlightChannelsModule`.
+    /// and hands them to `AlulaChannelsModule`.
     let channels: [ChannelRegistration]
 }
 
 """#,
             "Sources/App/Repos/ChatRepository.swift": #"""
 import Foundation
-import FlightDataPostgres
-import FlightWeb
+import AlulaDataPostgres
+import AlulaWeb
 
 /// Failures this repository raises on its own behalf. Controllers map these
 /// onto HTTP; the repository stays free of any web vocabulary.
@@ -2241,7 +2241,7 @@ struct ChatRepository: RoomStore {
     /// work through `withRepo` and gives it back — there is no request-scoped
     /// connection, so "which connection is this query on" is answered by the
     /// bracket you can see rather than by a scope you cannot.
-    // flight:hand-registered — PostgresDataModule registers the pool.
+    // alula:hand-registered — PostgresDataModule registers the pool.
     @Inject var pool: PostgresDataSource
 
     // MARK: Associations
@@ -2621,7 +2621,7 @@ protocol RoomStore: Sendable {
 """#,
             "Sources/App/Repos/UserRepository.swift": #"""
 import Foundation
-import FlightDataPostgres
+import AlulaDataPostgres
 
 /// The one thing signup can fail on that isn't a validation error.
 enum SignupError: Error, Sendable {
@@ -2633,7 +2633,7 @@ struct UserRepository: UserRepositoryProtocol {
     /// The pool. Each method leases a connection for its own work and gives
     /// it back; a unit of work that must share one connection says so by
     /// putting every statement inside a single `withRepo`.
-    // flight:hand-registered — PostgresDataModule registers the pool.
+    // alula:hand-registered — PostgresDataModule registers the pool.
     @Inject var pool: PostgresDataSource
 
     func all() async throws -> [User] {
@@ -2698,7 +2698,7 @@ struct UserRepository: UserRepositoryProtocol {
 
 """#,
             "Sources/App/Repos/UserRepositoryProtocol.swift": #"""
-import FlightDataPostgres
+import AlulaDataPostgres
 import Foundation
 
 /// The seam `UserService` depends on instead of the concrete, Postgres-bound
@@ -2722,23 +2722,23 @@ protocol UserRepositoryProtocol: Sendable {
 
 """#,
             "Sources/App/Security/DemoAccounts.swift": #"""
-import FlightCore
-import FlightSecurityCore
+import AlulaCore
+import AlulaSecurityCore
 
 /// The accounts the demo's password sign-in checks against.
 ///
 /// In memory, seeded at startup, so the demo runs with nothing to set up. A
 /// real application implements `CredentialStore` over its own users table —
 /// two methods, find by identifier and save a stronger hash — and provides
-/// that here instead; see Docs/sign-in.md in flight. Subjects are opaque ids,
+/// that here instead; see Docs/sign-in.md in alula. Subjects are opaque ids,
 /// never the email address: when this application moves to an identity
 /// provider, the subject is what every row keyed by user survives on.
 ///
 /// Its own module for the same reason `DemoAuthModule` is: `SessionController`
 /// injects the sign-in provider, which makes the provider — and so this store
 /// behind it — a root of the component graph, and `AppModule` takes the graph.
-struct DemoAccountsModule: FlightModule {
-    /// Matched by type to `FlightPasswordSignInModule`'s `store:`.
+struct DemoAccountsModule: AlulaModule {
+    /// Matched by type to `AlulaPasswordSignInModule`'s `store:`.
     let credentialStore: any CredentialStore
 
     init(configuration: Configuration) throws {
@@ -2764,23 +2764,23 @@ struct DemoAccountsModule: FlightModule {
     }
 
     init() {
-        preconditionFailure("DemoAccountsModule is built by flightComposeModules.")
+        preconditionFailure("DemoAccountsModule is built by alulaComposeModules.")
     }
 }
 
 """#,
             "Sources/App/Security/DemoTokenValidator.swift": #"""
-import FlightCore
-import FlightSecurityCore
+import AlulaCore
+import AlulaSecurityCore
 import Foundation
 
 /// A `TokenValidator` the demo can run without an identity provider.
 ///
 /// This is the **bring-your-own-auth seam**, and it is the whole point of the
-/// file. Flight Security Core ships one generic `OIDCTokenValidator` that any
+/// file. Alula Security Core ships one generic `OIDCTokenValidator` that any
 /// standards-compliant provider — Keycloak, Auth0, Okta, Entra, Descope — is
 /// merely *configuration* of. Registering a different `(any TokenValidator)`
-/// before `FlightSecurityModule` replaces it wholesale; the module checks for
+/// before `AlulaSecurityModule` replaces it wholesale; the module checks for
 /// an existing registration and steps aside.
 ///
 /// A real deployment deletes this file and sets `security.oidc.issuer` and
@@ -2801,7 +2801,7 @@ struct DemoTokenValidator: TokenValidator {
     /// The issuer stamped onto every `Principal` this produces, so the demo's
     /// principals are traceable to this validator and not mistaken for real
     /// federated identities.
-    static let issuer = "flight-demo://insecure-local-validator"
+    static let issuer = "alula-demo://insecure-local-validator"
 
     func validate(_ token: String) async throws -> Principal {
         let parts = token.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
@@ -2861,8 +2861,8 @@ protocol DigestReading: Sendable {
 
 """#,
             "Sources/App/Services/RoomDigestService.swift": #"""
-import FlightCache
-import FlightCore
+import AlulaCache
+import AlulaCore
 import Foundation
 
 /// The read-heavy side of the chat app, cached.
@@ -2919,8 +2919,8 @@ struct RoomDigestService: DigestInvalidating, DigestReading {
 
 """#,
             "Sources/App/Services/UserService.swift": #"""
-import FlightCore
-import FlightDataPostgres
+import AlulaCore
+import AlulaDataPostgres
 import Foundation
 
 /// The business-logic layer between controllers and data access.
@@ -2968,9 +2968,9 @@ struct UserService {
 
 """#,
             "Sources/App/Web/ErrorMapping.swift": #"""
-import FlightCore
-import FlightDataPostgres
-import FlightWeb
+import AlulaCore
+import AlulaDataPostgres
+import AlulaWeb
 
 /// One place where the error vocabularies this application *uses* but does
 /// not own become HTTP.
@@ -2980,7 +2980,7 @@ import FlightWeb
 /// application actually meets — `DataSourceError`, `HangarError`,
 /// `ChangesetValidationError` — with no HTTP shape, and they cannot be
 /// conformed here: they belong to other packages, and the packages below
-/// `FlightWeb` deliberately do not depend on it. A middleware cannot help
+/// `AlulaWeb` deliberately do not depend on it. A middleware cannot help
 /// either, because a handler's error is rendered by the router *inside* the
 /// chain — by the time middleware sees anything it is a finished 500.
 ///
@@ -3026,8 +3026,8 @@ enum AppErrorMapping {
 
 """#,
             "Sources/App/Web/RequestLogging.swift": #"""
-import FlightCore
-import FlightWeb
+import AlulaCore
+import AlulaWeb
 
 /// Logs the method and path of every request as it arrives.
 @Middleware
@@ -3040,7 +3040,7 @@ struct RequestLogging: Sendable {
 
 """#,
             "Sources/Migrations/20260101000000_CreateUsers.swift": #"""
-import FlightMigrate
+import AlulaMigrate
 import Foundation
 
 /// Migrations are ordinary Swift, discovered at build time by their filename
@@ -3075,7 +3075,7 @@ struct CreateUsers: Migration {
 
 """#,
             "Sources/Migrations/20260717190157_CreateMessages.swift": #"""
-import FlightMigrate
+import AlulaMigrate
 
 struct CreateMessages: Migration {
     // Postgres runs this migration inside a transaction together with its
@@ -3102,7 +3102,7 @@ struct CreateMessages: Migration {
 
 """#,
             "Sources/Migrations/20260823120000_AddChatGraph.swift": #"""
-import FlightMigrate
+import AlulaMigrate
 
 /// Turns the flat `messages` table into a small graph, so the demo can show
 /// the query shapes a real application actually needs: rooms holding many
@@ -3206,8 +3206,8 @@ struct AddChatGraph: Migration {
 
 """#,
             "Sources/migrate/Migrate.swift": #"""
-import FlightMigrate
-import FlightMigrateCLI
+import AlulaMigrate
+import AlulaMigrateCLI
 import Migrations
 
 @main
@@ -3216,9 +3216,9 @@ struct Migrate: MigrateTool {
 }
 """#,
             "Tests/AppTests/AttachmentControllerTests.swift": #"""
-import FlightCore
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaWeb
+import AlulaWebTesting
 import Foundation
 import Testing
 @testable import App
@@ -3232,7 +3232,7 @@ struct AttachmentControllerTests {
     @Test("a file and its form fields arrive, sizes intact")
     func uploadRoundTrip() async throws {
         let client = try TestClient(
-            routes: AttachmentController.flightRoutes { _ in AttachmentController() })
+            routes: AttachmentController.alulaRoutes { _ in AttachmentController() })
 
         let boundary = "----DemoBoundary"
         let filePayload = String(repeating: "b", count: 50_000)
@@ -3268,7 +3268,7 @@ struct AttachmentControllerTests {
     @Test("a body that is not multipart is refused as a 415")
     func nonMultipartRefused() async throws {
         let client = try TestClient(
-            routes: AttachmentController.flightRoutes { _ in AttachmentController() })
+            routes: AttachmentController.alulaRoutes { _ in AttachmentController() })
         let response = await client.post(
             "/attachments",
             headers: [.contentType: "application/json"],
@@ -3279,17 +3279,17 @@ struct AttachmentControllerTests {
 
 """#,
             "Tests/AppTests/BootstrapTests.swift": #"""
-import FlightActuator
-import FlightChannels
-import FlightCache
-import FlightCore
-import FlightRateLimit
-import FlightDataPostgres
-import FlightPresence
-import FlightPubSub
-import FlightSecurityCore
-import FlightTransport
-import FlightWeb
+import AlulaActuator
+import AlulaChannels
+import AlulaCache
+import AlulaCore
+import AlulaRateLimit
+import AlulaDataPostgres
+import AlulaPresence
+import AlulaPubSub
+import AlulaSecurityCore
+import AlulaTransport
+import AlulaWeb
 import Testing
 
 @testable import App
@@ -3308,30 +3308,30 @@ struct BootstrapTests {
     /// transport (binding a socket is not what is under test here): what the
     /// graph needs, then the graph, then what is built from it, then assemble.
     /// Returns the graph so a test can confirm which components it built.
-    private func boot() throws -> FlightGraph {
+    private func boot() throws -> AlulaGraph {
         let configuration = Configuration(values: [
             "app.name": "App",
             "datasource.primary.url": "postgres://localhost/unused",
         ])
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
         let auth = DemoAuthModule()
-        let pubsub = try FlightPubSubModule(configuration: configuration)
+        let pubsub = try AlulaPubSubModule(configuration: configuration)
         // Only what a *component* needs is a graph root. Values a route terminal
         // alone needs — the broadcaster, the socket stack, the validator — are
-        // parameters of `flightRoutes`, which keeps the graph free of Channels
+        // parameters of `alulaRoutes`, which keeps the graph free of Channels
         // and so lets channels be built from the graph.
-        let graph = try FlightGraph(
+        let graph = try AlulaGraph(
             configuration: configuration, postgresDataSource: postgres.dataSource)
-        let presenceModule = try FlightPresenceModule(
+        let presenceModule = try AlulaPresenceModule(
             configuration: configuration, localBus: pubsub.local, gossipBus: pubsub.bus)
         let demoChannels = DemoChannelsModule(
             graph: graph, presence: presenceModule.presence)
-        let channels = try FlightChannelsModule(
+        let channels = try AlulaChannelsModule(
             bus: pubsub.bus, configuration: configuration, channels: demoChannels.channels)
         // Assembling every module is the value-model equivalent of freezing the
         // container: the graph already built every component eagerly above, and
         // assemble seeds health and collects services over the whole set.
-        _ = try Flight.assemble(
+        _ = try Alula.assemble(
             configuration: configuration,
             modules: [
                 postgres,
@@ -3340,14 +3340,14 @@ struct BootstrapTests {
                 demoChannels,
                 channels,
                 AppModule(graph: graph, limiter: RateLimiter(store: InMemoryRateLimitStore())),
-                FlightSecurityModule(validator: auth.tokenValidator),
-                try FlightPasswordSignInModule(
+                AlulaSecurityModule(validator: auth.tokenValidator),
+                try AlulaPasswordSignInModule(
                     configuration: configuration,
                     store: DemoAccountsModule(configuration: configuration).credentialStore,
                     limiter: RateLimiter(store: InMemoryRateLimitStore())),
                 ActuatorModule(),
                 presenceModule,
-                try FlightCacheModule(configuration: configuration),
+                try AlulaCacheModule(configuration: configuration),
             ])
         return graph
     }
@@ -3359,7 +3359,7 @@ struct BootstrapTests {
 
     @Test("the demo's own token validator is the one composed in")
     func bringYourOwnAuth() throws {
-        // The app supplies its validator by value to `FlightSecurityModule`;
+        // The app supplies its validator by value to `AlulaSecurityModule`;
         // nothing looks up an OIDC default, so no `security.oidc.*` is demanded.
         let auth = DemoAuthModule()
         #expect(auth.tokenValidator is DemoTokenValidator)
@@ -3381,8 +3381,8 @@ struct BootstrapTests {
 
 """#,
             "Tests/AppTests/ChatJobsTests.swift": #"""
-import FlightCore
-import FlightWebTesting
+import AlulaCore
+import AlulaWebTesting
 import Foundation
 import Testing
 
@@ -3429,7 +3429,7 @@ struct ChatJobsTests {
 
 """#,
             "Tests/AppTests/DemoTokenValidatorTests.swift": #"""
-import FlightSecurityCore
+import AlulaSecurityCore
 import Testing
 
 @testable import App
@@ -3491,12 +3491,12 @@ struct DemoTokenValidatorTests {
 
 """#,
             "Tests/AppTests/RateLimitingTests.swift": #"""
-import FlightCore
-import FlightRateLimit
-import FlightRateLimitTesting
-import FlightSecurityCore
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaRateLimit
+import AlulaRateLimitTesting
+import AlulaSecurityCore
+import AlulaWeb
+import AlulaWebTesting
 import HTTPTypes
 import Testing
 
@@ -3513,7 +3513,7 @@ struct RateLimitingTests {
     /// The demo's own key rule, with a quota small enough to reach in a test.
     private func client(quota: RateLimitQuota = .perMinute(2)) throws -> TestClient {
         let validator: any TokenValidator = DemoTokenValidator()
-        let security = FlightSecurityModule(validator: validator)
+        let security = AlulaSecurityModule(validator: validator)
         let limiting = RateLimiting(store: store, quota: quota) { context in
             context.principal?.subject ?? context.clientAddress?.host ?? "unknown"
         }
@@ -3602,17 +3602,17 @@ struct RateLimitingTests {
 
 """#,
             "Tests/AppTests/RealtimeTests.swift": #"""
-import FlightChannels
-import FlightChannelsClient
-import FlightChannelsProtocol
-import FlightChannelsTesting
-import FlightCore
-import FlightPresence
-import FlightPresenceClient
-import FlightPubSub
-import FlightSecurityCore
-import FlightWeb
-import FlightWebTesting
+import AlulaChannels
+import AlulaChannelsClient
+import AlulaChannelsProtocol
+import AlulaChannelsTesting
+import AlulaCore
+import AlulaPresence
+import AlulaPresenceClient
+import AlulaPubSub
+import AlulaSecurityCore
+import AlulaWeb
+import AlulaWebTesting
 import Foundation
 import Testing
 
@@ -3623,7 +3623,7 @@ import Testing
 /// real Presence CRDT. Only the database is faked.
 ///
 /// This is the suite that proves the thing the demo previously only claimed —
-/// that a chat app built on Flight actually delivers messages and presence to
+/// that a chat app built on Alula actually delivers messages and presence to
 /// the people in the room.
 /// Holds the demo's room channel, built from a fake store and the shared
 /// presence — the same shape `AppModule`/`DemoChannelsModule` use, a value
@@ -3656,24 +3656,24 @@ private struct Harness {
     init(store: FakeRoomStore) throws {
         self.store = store
         let configuration = Configuration(values: [
-            "flight.channels.heartbeat-check-interval-seconds": "0.05"
+            "alula.channels.heartbeat-check-interval-seconds": "0.05"
         ])
         // The wiring, written out: PubSub's bus and this module's declared
         // channels are what Channels is built from.
-        let pubsub = try FlightPubSubModule(configuration: configuration)
+        let pubsub = try AlulaPubSubModule(configuration: configuration)
         // No adapter: a single-node test, stated rather than discovered.
-        let presenceModule = try FlightPresenceModule(
+        let presenceModule = try AlulaPresenceModule(
             configuration: configuration, localBus: pubsub.local, gossipBus: pubsub.bus)
         let presence = presenceModule.presence
         let realtime = RealtimeModule(store: store, presence: presence)
-        let channels = try FlightChannelsModule(
+        let channels = try AlulaChannelsModule(
             bus: pubsub.bus, configuration: configuration, channels: realtime.channels)
         // The real route the application ships (`SocketController`), built the
-        // way `flightRoutes` builds it: the validator by value, the channels
+        // way `alulaRoutes` builds it: the validator by value, the channels
         // stack from the channels module. This is what exercises the upgrade
         // path users actually get.
         let sockets = channels.sockets
-        let socketRoutes = SocketController.flightRoutes { _ in
+        let socketRoutes = SocketController.alulaRoutes { _ in
             SocketController(validator: DemoTokenValidator(), sockets: sockets)
         }
         self.testClient = try TestClient(routes: socketRoutes)
@@ -3686,14 +3686,14 @@ private struct Harness {
     func client(as subject: String, roles: String = "") -> ChannelClient {
         let token = roles.isEmpty ? "demo:\(subject)" : "demo:\(subject):\(roles)"
         return ChannelClient(
-            url: URL(string: "flight-test:///socket")!,
+            url: URL(string: "alula-test:///socket")!,
             transport: InMemoryChannelTransport(testClient: testClient, query: "token=\(token)"))
     }
 
     /// A client with no credential at all.
     func anonymousClient() -> ChannelClient {
         ChannelClient(
-            url: URL(string: "flight-test:///socket")!,
+            url: URL(string: "alula-test:///socket")!,
             transport: InMemoryChannelTransport(testClient: testClient))
     }
 }
@@ -3956,7 +3956,7 @@ private func eventually(
 
 """#,
             "Tests/AppTests/RoomChannelTests.swift": #"""
-import FlightChannelsProtocol
+import AlulaChannelsProtocol
 import Foundation
 import Testing
 
@@ -4035,12 +4035,12 @@ struct RoomChannelTests {
 
 """#,
             "Tests/AppTests/SessionControllerTests.swift": #"""
-import FlightCore
-import FlightRateLimit
-import FlightSecurityCore
-import FlightSessionsTesting
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaRateLimit
+import AlulaSecurityCore
+import AlulaSessionsTesting
+import AlulaWeb
+import AlulaWebTesting
 import Foundation
 import HTTPTypes
 import Testing
@@ -4056,12 +4056,12 @@ struct SessionControllerTests {
     private let store = RecordingSessionStore()
 
     private func client() throws -> TestClient {
-        let sessions = try FlightSessionsModule(
+        let sessions = try AlulaSessionsModule(
             configuration: Configuration(values: ["sessions.cookie-secure": "false"]),
             store: store)
         // No bearer validator is needed for a browser; the demo's is for its
         // APIs, and it is exercised elsewhere.
-        let security = FlightSecurityModule(validator: nil, sessions: sessions.runtime)
+        let security = AlulaSecurityModule(validator: nil, sessions: sessions.runtime)
         // The demo's accounts, and the password provider over them — hashed
         // with cheap parameters so the suite stays fast.
         let fast = Argon2idHashing(parameters: .init(timeCost: 1, memoryCost: 8, parallelism: 1))
@@ -4077,7 +4077,7 @@ struct SessionControllerTests {
                 store: accounts, issuer: "local", hasher: fast,
                 limiter: RateLimiter(store: InMemoryRateLimitStore())))
         return try TestClient(
-            routes: SessionController.flightRoutes { _ in SessionController(provider: provider) },
+            routes: SessionController.alulaRoutes { _ in SessionController(provider: provider) },
             middleware:
                 sessions.middleware + security.middleware
                 + MiddlewareRegistration.lane("csrf", [CSRFProtection()]))
@@ -4207,7 +4207,7 @@ struct SessionControllerTests {
 }
 
 extension HTTPField.Name {
-    /// The demo's tests live outside `FlightWeb`, so this is the public name
+    /// The demo's tests live outside `AlulaWeb`, so this is the public name
     /// — the same literal `CSRFProtection` checks internally, declared here
     /// because a test has no reason to `@testable import` the framework.
     fileprivate static let xCSRFToken = HTTPField.Name("x-csrf-token")!
@@ -4283,8 +4283,8 @@ extension Room {
 
 """#,
             "Tests/AppTests/Support/MockUserRepository.swift": #"""
-import FlightCore
-import FlightDataPostgres
+import AlulaCore
+import AlulaDataPostgres
 import Foundation
 import Synchronization
 @testable import App
@@ -4329,9 +4329,9 @@ final class MockUserRepository: UserRepositoryProtocol, Sendable {
 
 """#,
             "Tests/AppTests/UserControllerTests.swift": #"""
-import FlightCore
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaWeb
+import AlulaWebTesting
 import Foundation
 import Testing
 @testable import App
@@ -4416,11 +4416,11 @@ struct UserControllerTests {
 struct UserRoutesEndToEndTests {
 
     private func client(_ repository: MockUserRepository) throws -> TestClient {
-        // `flightRoutes` is generated alongside the per-route factories and
+        // `alulaRoutes` is generated alongside the per-route factories and
         // returns all of them, so nothing here names a route by position — add
         // a route to the controller and this keeps working unchanged.
         try TestClient(
-            routes: UserController.flightRoutes { _ in
+            routes: UserController.alulaRoutes { _ in
                 UserController(users: UserService(repository: repository))
             })
     }
@@ -4469,8 +4469,8 @@ private struct UserPayload: Decodable {
 
 """#,
             "Tests/AppTests/UserServiceTests.swift": #"""
-import FlightCore
-import FlightWebTesting
+import AlulaCore
+import AlulaWebTesting
 import Foundation
 import Testing
 @testable import App
@@ -4510,17 +4510,17 @@ struct UserServiceTests {
 
 """#,
             "Tests/AppTests/VisitsControllerTests.swift": #"""
-import FlightCore
-import FlightSessionsTesting
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaSessionsTesting
+import AlulaWeb
+import AlulaWebTesting
 import Foundation
 import HTTPTypes
 import Testing
 
 @testable import App
 
-/// The session middleware runs for real here — `FlightSessionsModule` built
+/// The session middleware runs for real here — `AlulaSessionsModule` built
 /// the way the composition root builds it, with a recording store in place
 /// of the in-memory one — so the suite proves the cookie round-trips, not
 /// only that the handler reads what it wrote.
@@ -4529,11 +4529,11 @@ struct VisitsControllerTests {
     private let store = RecordingSessionStore()
 
     private func client() throws -> TestClient {
-        let sessions = try FlightSessionsModule(
+        let sessions = try AlulaSessionsModule(
             configuration: Configuration(values: ["sessions.cookie-secure": "false"]),
             store: store)
         return try TestClient(
-            routes: VisitsController.flightRoutes { _ in VisitsController() },
+            routes: VisitsController.alulaRoutes { _ in VisitsController() },
             middleware: sessions.middleware)
     }
 
@@ -4581,67 +4581,9 @@ struct VisitsControllerTests {
 }
 
 """#,
-            "docker-compose.yml": #"""
-# The database this project expects, in one command:
-#
-#     docker compose up -d
-#
-# The credentials, port and database name below match `datasource.primary.url`
-# in flight.yaml exactly, so `swift run` works immediately after this comes up
-# with nothing else to configure.
-#
-# Port 55432, not 5432, deliberately: a Postgres already installed on the host
-# owns the default port, and a project that silently connected to *that* would
-# be reading and writing someone's real data. A non-default port cannot collide
-# by accident.
-services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_PASSWORD: flight
-      POSTGRES_DB: flight_demo
-    ports:
-      - '127.0.0.1:55432:5432'
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    # Bound to 127.0.0.1 rather than 0.0.0.0: a development database with a
-    # known password should not be reachable from the network.
-    security_opt:
-      - no-new-privileges:true
-    # `depends_on: condition: service_healthy` in your own services, and
-    # `docker compose up --wait`, both rely on this.
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres -d flight_demo']
-      interval: 2s
-      timeout: 3s
-      retries: 15
-
-volumes:
-  postgres-data:
-
-# ── Running the tests against a real database ────────────────────────────────
-#
-# Tests should not share the database you are developing against: a test that
-# empties a table would take your development data with it. Create a separate
-# one on this same server, once:
-#
-#     docker compose exec postgres createdb -U postgres flight_demo_test
-#
-# then point the tests at it, e.g.
-#
-#     export DATABASE_URL="postgres://postgres:flight@127.0.0.1:55432/flight_demo_test?sslmode=disable"
-#
-# The tests this project ships need no database at all. Controllers and services
-# are built with fakes and asserted on directly, channels run over an in-memory
-# transport, and the bootstrap test supplies a datasource URL that nothing dials.
-# That is the tier most tests belong in. A database is needed only for the
-# smaller tier that exercises real SQL.
-
-"""#,
-            "flight-dev.yaml": #"""
-# Loaded on top of flight.yaml when FLIGHT_ENV is `dev`, which is what an
-# unset FLIGHT_ENV means. Nothing in here belongs in production.
+            "alula-dev.yaml": #"""
+# Loaded on top of alula.yaml when ALULA_ENV is `dev`, which is what an
+# unset ALULA_ENV means. Nothing in here belongs in production.
 
 sessions:
   # The session cookie is `Secure` by default, because it is a bearer
@@ -4651,7 +4593,7 @@ sessions:
   cookie-secure: false
 
 """#,
-            "flight.yaml": #"""
+            "alula.yaml": #"""
 app:
   name: App
 
@@ -4661,7 +4603,7 @@ server:
 
 datasource:
   primary:
-    url: "postgres://postgres:flight@127.0.0.1:55432/flight_demo?sslmode=disable"
+    url: "postgres://postgres:alula@127.0.0.1:55432/alula_demo?sslmode=disable"
     pool_size: 5
 
 actuator:
@@ -4670,10 +4612,10 @@ actuator:
 # Channels: the per-socket outbound queue. When it fills, the OLDEST messages
 # are dropped — a client behind on a realtime feed wants current state, not a
 # backlog it can never catch up on. Drops are counted per socket and logged.
-# Note the `flight.` prefix here, absent from `server`/`datasource`/`actuator`
+# Note the `alula.` prefix here, absent from `server`/`datasource`/`actuator`
 # above: Channels and Presence namespace their keys, the older packages do not.
 # That inconsistency is real and predates this demo.
-flight:
+alula:
   channels:
     outbound-buffer-size: 256
     heartbeat-timeout-seconds: 60
@@ -4694,18 +4636,76 @@ flight:
 # security:
 #   oidc:
 #     issuer: https://your-tenant.example.com/
-#     audience: flight-demo
+#     audience: alula-demo
 #     roles_claim: realm_access.roles
 #
 # Browser sign-in is the same story. This demo checks passwords itself
-# (FlightPasswordSignInModule over DemoAccountsModule); to sign in through
-# the same provider instead, list FlightOIDCSignInModule in Main.swift in
+# (AlulaPasswordSignInModule over DemoAccountsModule); to sign in through
+# the same provider instead, list AlulaOIDCSignInModule in Main.swift in
 # place of those two and add the client this application is to it:
 #
-#     client-id: flight-demo
+#     client-id: alula-demo
 #     client-secret: "…"                 # omit for a public client
 #     redirect-uri: https://app.example.com/session/callback
 #     post-logout-redirect-uri: https://app.example.com/
+
+"""#,
+            "docker-compose.yml": #"""
+# The database this project expects, in one command:
+#
+#     docker compose up -d
+#
+# The credentials, port and database name below match `datasource.primary.url`
+# in alula.yaml exactly, so `swift run` works immediately after this comes up
+# with nothing else to configure.
+#
+# Port 55432, not 5432, deliberately: a Postgres already installed on the host
+# owns the default port, and a project that silently connected to *that* would
+# be reading and writing someone's real data. A non-default port cannot collide
+# by accident.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: alula
+      POSTGRES_DB: alula_demo
+    ports:
+      - '127.0.0.1:55432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # Bound to 127.0.0.1 rather than 0.0.0.0: a development database with a
+    # known password should not be reachable from the network.
+    security_opt:
+      - no-new-privileges:true
+    # `depends_on: condition: service_healthy` in your own services, and
+    # `docker compose up --wait`, both rely on this.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d alula_demo']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  postgres-data:
+
+# ── Running the tests against a real database ────────────────────────────────
+#
+# Tests should not share the database you are developing against: a test that
+# empties a table would take your development data with it. Create a separate
+# one on this same server, once:
+#
+#     docker compose exec postgres createdb -U postgres alula_demo_test
+#
+# then point the tests at it, e.g.
+#
+#     export DATABASE_URL="postgres://postgres:alula@127.0.0.1:55432/alula_demo_test?sslmode=disable"
+#
+# The tests this project ships need no database at all. Controllers and services
+# are built with fakes and asserted on directly, channels run over an in-memory
+# transport, and the bootstrap test supplies a datasource URL that nothing dials.
+# That is the tier most tests belong in. A database is needed only for the
+# smaller tier that exercises real SQL.
 
 """#,
         ],
@@ -4714,12 +4714,12 @@ flight:
 // swift-tools-version: 6.3
 import PackageDescription
 
-// A Flight application, at its smallest: configuration, dependency injection,
+// An Alula application, at its smallest: configuration, dependency injection,
 // an HTTP server, and the operational endpoints. Nothing else — no database,
 // no real-time layer, no cache.
 //
-// Two package dependencies carry all of it. `flight` is the framework and the
-// layers above it; `flight-data` is persistence and caching, and is absent
+// Two package dependencies carry all of it. `alula` is the framework and the
+// layers above it; `alula-data` is persistence and caching, and is absent
 // here because this tier does not persist anything yet.
 let package = Package(
     name: "App",
@@ -4728,38 +4728,38 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        // `traits:` names what you want from flight, and nothing else is
+        // `traits:` names what you want from alula, and nothing else is
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // core: configuration, composition, and the service lifecycle.
-        .package(url: "https://github.com/Flight-Framework/flight.git", from: "0.21.2", traits: ["Web"])
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.36.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
             name: "App",
             dependencies: [
-                .product(name: "FlightCore", package: "flight"),
-                .product(name: "FlightWeb", package: "flight"),
+                .product(name: "AlulaCore", package: "alula"),
+                .product(name: "AlulaWeb", package: "alula"),
                 // Choosing a transport is choosing a module. This one wraps
                 // HummingbirdCore; any conforming transport is a peer.
-                .product(name: "FlightTransport", package: "flight"),
-                .product(name: "FlightActuator", package: "flight"),
+                .product(name: "AlulaTransport", package: "alula"),
+                .product(name: "AlulaActuator", package: "alula"),
             ],
             // Scans this target for @Component/@Controller/@Service and
-            // generates the composition root (`flightComposeModules`) at build time. It also checks
-            // every @ConfigValue key without a default against flight.yaml,
+            // generates the composition root (`alulaComposeModules`) at build time. It also checks
+            // every @ConfigValue key without a default against alula.yaml,
             // so a missing key is a compile error rather than a 3am page.
             plugins: [
-                .plugin(name: "FlightRegistrationPlugin", package: "flight")
+                .plugin(name: "AlulaRegistrationPlugin", package: "alula")
             ]
         ),
         .testTarget(
             name: "AppTests",
             dependencies: [
                 "App",
-                .product(name: "FlightCore", package: "flight"),
-                .product(name: "FlightWeb", package: "flight"),
-                .product(name: "FlightWebTesting", package: "flight"),
+                .product(name: "AlulaCore", package: "alula"),
+                .product(name: "AlulaWeb", package: "alula"),
+                .product(name: "AlulaWebTesting", package: "alula"),
             ]
         ),
     ]
@@ -4767,8 +4767,8 @@ let package = Package(
 
 """#,
             "Sources/App/Controllers/HealthController.swift": #"""
-import FlightCore
-import FlightWeb
+import AlulaCore
+import AlulaWeb
 
 /// The one route this tier ships, so there is something to curl before you
 /// have written anything.
@@ -4778,7 +4778,7 @@ import FlightWeb
 @Controller
 struct HealthController {
 
-    /// Reads a key from `flight.yaml`. With no `default:`, the build plugin
+    /// Reads a key from `alula.yaml`. With no `default:`, the build plugin
     /// verifies the key exists — misspell it and the build fails, naming it.
     @ConfigValue("app.name") var appName: String
 
@@ -4793,10 +4793,10 @@ struct HealthController {
 
 """#,
             "Sources/App/Main.swift": #"""
-import FlightActuator
-import FlightCore
-import FlightTransport
-import FlightWeb
+import AlulaActuator
+import AlulaCore
+import AlulaTransport
+import AlulaWeb
 
 /// Your application's module: one place that says what this app is made of.
 ///
@@ -4804,10 +4804,10 @@ import FlightWeb
 /// `@Controller`, `@Service`, `@Repository`, and `@Component` the registration
 /// plugin scans — is wired by the generated composition root, so adding a
 /// controller does not mean editing this file.
-struct AppModule: FlightModule {
+struct AppModule: AlulaModule {
     /// Modules that must be built before this one. The list is a DAG resolved
     /// once at bootstrap, so ordering is checked rather than hoped for.
-    static var dependencies: [any FlightModule.Type] { [] }
+    static var dependencies: [any AlulaModule.Type] { [] }
 }
 
 @main
@@ -4818,15 +4818,15 @@ struct Main {
         // the server start accepting requests. Nothing serves traffic against
         // a half-built graph.
         //
-        // `Flight.run` rather than `main() async throws`: an error escaping
+        // `Alula.run` rather than `main() async throws`: an error escaping
         // `main` is reported by the Swift runtime as "Fatal error: Error
         // raised at top level" followed by a register dump and a backtrace —
         // which is what a new project sees when Postgres is not running or
         // the port is already bound. `run` prints the reason and exits 1.
-        await Flight.run(
+        await Alula.run(
             configuration: try Configuration.load(),
             modules: [
-                FlightWebModule<FlightTransport>.self,
+                AlulaWebModule<AlulaTransport>.self,
                 AppModule.self,
                 ActuatorModule.self,
             ],
@@ -4836,7 +4836,7 @@ struct Main {
             // composer that builds them in dependency order, which is what
             // lets a module take what it needs as initializer parameters.
             // It is required — there is no path without it.
-            composedBy: flightComposeModules
+            composedBy: alulaComposeModules
         )
     }
 }
@@ -4849,9 +4849,9 @@ struct Main {
 
 """#,
             "Tests/AppTests/HealthControllerTests.swift": #"""
-import FlightCore
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaWeb
+import AlulaWebTesting
 import Testing
 
 @testable import App
@@ -4865,10 +4865,10 @@ struct HealthControllerTests {
     @Test("the index route answers with the configured application name")
     func index() async throws {
         // The composition root's sequence, by hand: build the graph, then the
-        // routes from it — the values `FlightWebModule` is composed with.
+        // routes from it — the values `AlulaWebModule` is composed with.
         let configuration = Configuration(values: ["app.name": "TestApp"])
-        let graph = try FlightGraph(configuration: configuration)
-        let client = try TestClient(routes: flightRoutes(graph))
+        let graph = try AlulaGraph(configuration: configuration)
+        let client = try TestClient(routes: alulaRoutes(graph))
 
         let response = await client.get("/")
 
@@ -4878,8 +4878,8 @@ struct HealthControllerTests {
 }
 
 """#,
-            "flight.yaml": #"""
-# Layer 3 of Flight Config: the file. Environment variables (FLIGHT_*) layer
+            "alula.yaml": #"""
+# Layer 3 of Alula Config: the file. Environment variables (ALULA_*) layer
 # over it, and both are frozen into an immutable `Configuration` at bootstrap —
 # nothing re-reads this file at runtime.
 app:
@@ -4889,7 +4889,7 @@ server:
   host: 127.0.0.1
   port: 8080
 
-# Health, info, and metrics. Not registered at all when FLIGHT_ENV is prod:
+# Health, info, and metrics. Not registered at all when ALULA_ENV is prod:
 # the routes do not exist rather than existing-but-guarded.
 actuator:
   format: json

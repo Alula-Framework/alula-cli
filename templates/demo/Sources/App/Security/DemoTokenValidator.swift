@@ -1,14 +1,14 @@
-import FlightCore
-import FlightSecurityCore
+import AlulaCore
+import AlulaSecurityCore
 import Foundation
 
 /// A `TokenValidator` the demo can run without an identity provider.
 ///
 /// This is the **bring-your-own-auth seam**, and it is the whole point of the
-/// file. Flight Security Core ships one generic `OIDCTokenValidator` that any
+/// file. Alula Security Core ships one generic `OIDCTokenValidator` that any
 /// standards-compliant provider — Keycloak, Auth0, Okta, Entra, Descope — is
 /// merely *configuration* of. Registering a different `(any TokenValidator)`
-/// before `FlightSecurityModule` replaces it wholesale; the module checks for
+/// before `AlulaSecurityModule` replaces it wholesale; the module checks for
 /// an existing registration and steps aside.
 ///
 /// A real deployment deletes this file and sets `security.oidc.issuer` and
@@ -29,7 +29,7 @@ struct DemoTokenValidator: TokenValidator {
     /// The issuer stamped onto every `Principal` this produces, so the demo's
     /// principals are traceable to this validator and not mistaken for real
     /// federated identities.
-    static let issuer = "flight-demo://insecure-local-validator"
+    static let issuer = "alula-demo://insecure-local-validator"
 
     func validate(_ token: String) async throws -> Principal {
         let parts = token.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)

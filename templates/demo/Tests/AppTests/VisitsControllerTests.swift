@@ -1,14 +1,14 @@
-import FlightCore
-import FlightSessionsTesting
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaSessionsTesting
+import AlulaWeb
+import AlulaWebTesting
 import Foundation
 import HTTPTypes
 import Testing
 
 @testable import App
 
-/// The session middleware runs for real here — `FlightSessionsModule` built
+/// The session middleware runs for real here — `AlulaSessionsModule` built
 /// the way the composition root builds it, with a recording store in place
 /// of the in-memory one — so the suite proves the cookie round-trips, not
 /// only that the handler reads what it wrote.
@@ -17,11 +17,11 @@ struct VisitsControllerTests {
     private let store = RecordingSessionStore()
 
     private func client() throws -> TestClient {
-        let sessions = try FlightSessionsModule(
+        let sessions = try AlulaSessionsModule(
             configuration: Configuration(values: ["sessions.cookie-secure": "false"]),
             store: store)
         return try TestClient(
-            routes: VisitsController.flightRoutes { _ in VisitsController() },
+            routes: VisitsController.alulaRoutes { _ in VisitsController() },
             middleware: sessions.middleware)
     }
 

@@ -1,9 +1,9 @@
-import FlightCore
-import FlightRateLimit
-import FlightSecurityCore
-import FlightSessionsTesting
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaRateLimit
+import AlulaSecurityCore
+import AlulaSessionsTesting
+import AlulaWeb
+import AlulaWebTesting
 import Foundation
 import HTTPTypes
 import Testing
@@ -19,12 +19,12 @@ struct SessionControllerTests {
     private let store = RecordingSessionStore()
 
     private func client() throws -> TestClient {
-        let sessions = try FlightSessionsModule(
+        let sessions = try AlulaSessionsModule(
             configuration: Configuration(values: ["sessions.cookie-secure": "false"]),
             store: store)
         // No bearer validator is needed for a browser; the demo's is for its
         // APIs, and it is exercised elsewhere.
-        let security = FlightSecurityModule(validator: nil, sessions: sessions.runtime)
+        let security = AlulaSecurityModule(validator: nil, sessions: sessions.runtime)
         // The demo's accounts, and the password provider over them — hashed
         // with cheap parameters so the suite stays fast.
         let fast = Argon2idHashing(parameters: .init(timeCost: 1, memoryCost: 8, parallelism: 1))
@@ -40,7 +40,7 @@ struct SessionControllerTests {
                 store: accounts, issuer: "local", hasher: fast,
                 limiter: RateLimiter(store: InMemoryRateLimitStore())))
         return try TestClient(
-            routes: SessionController.flightRoutes { _ in SessionController(provider: provider) },
+            routes: SessionController.alulaRoutes { _ in SessionController(provider: provider) },
             middleware:
                 sessions.middleware + security.middleware
                 + MiddlewareRegistration.lane("csrf", [CSRFProtection()]))
@@ -170,7 +170,7 @@ struct SessionControllerTests {
 }
 
 extension HTTPField.Name {
-    /// The demo's tests live outside `FlightWeb`, so this is the public name
+    /// The demo's tests live outside `AlulaWeb`, so this is the public name
     /// — the same literal `CSRFProtection` checks internally, declared here
     /// because a test has no reason to `@testable import` the framework.
     fileprivate static let xCSRFToken = HTTPField.Name("x-csrf-token")!

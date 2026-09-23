@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  # Called by flight and flight-data so a breaking change there fails HERE,
+  # Called by alula and alula-data so a breaking change there fails HERE,
   # on the pull request that caused it, rather than in a new user's first ten
   # minutes with a downloaded starter project.
   #
@@ -16,12 +16,12 @@ on:
   # merged, not the change under review.
   workflow_call:
     inputs:
-      flight_ref:
-        description: "The flight commit to build the templates against."
+      alula_ref:
+        description: "The alula commit to build the templates against."
         type: string
         default: main
-      flight_data_ref:
-        description: "The flight-data commit to build the templates against."
+      alula_data_ref:
+        description: "The alula-data commit to build the templates against."
         type: string
         default: main
       caller:
@@ -36,19 +36,19 @@ on:
 #
 # The literal prefix: `github.workflow` and `github.ref` resolve to the
 # *caller's* values inside a reusable workflow, so without it this group is
-# identical to the one flight's run already occupies when it calls us, and
+# identical to the one alula's run already occupies when it calls us, and
 # cancel-in-progress means the called job is never scheduled.
 #
-# And `inputs.caller`, because the prefix alone was not enough. flight's CI
-# calls this workflow directly *and* calls flight-data's, which calls this
+# And `inputs.caller`, because the prefix alone was not enough. alula's CI
+# calls this workflow directly *and* calls alula-data's, which calls this
 # workflow again — two invocations inside one run, both evaluating the
 # caller's context to the same string, so they landed in the same group and
 # cancel-in-progress killed one of them. That is why every `Starter
-# templates` job in flight's CI has been `cancelled` for as far back as the
-# run history goes, while the copy nested under flight-data ran. A gate that
+# templates` job in alula's CI has been `cancelled` for as far back as the
+# run history goes, while the copy nested under alula-data ran. A gate that
 # is never scheduled reports nothing and looks like it is working.
 concurrency:
-  group: flight-cli-${{ inputs.caller }}-${{ github.workflow }}-${{ github.ref }}
+  group: alula-cli-${{ inputs.caller }}-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -70,7 +70,7 @@ jobs:
       - name: Install python3 and curl
         run: apt-get update -qq && apt-get install -y -qq python3 curl
 
-      # Even with flight and flight-data checked out as siblings, their own
+      # Even with alula and alula-data checked out as siblings, their own
       # dependencies — hangar, swift-changeset — are resolved by URL. Every
       # one of those repositories is public now, so the token is a
       # rate-limit courtesy rather than a requirement: a fork with no secret
@@ -84,33 +84,33 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          repository: Flight-Framework/flight-cli
-          ref: ${{ inputs.flight_ref != '' && 'main' || github.sha }}
-          path: flight-cli
+          repository: Alula-Framework/alula-cli
+          ref: ${{ inputs.alula_ref != '' && 'main' || github.sha }}
+          path: alula-cli
 
       - uses: actions/checkout@v4
         with:
-          repository: Flight-Framework/flight
-          ref: ${{ inputs.flight_ref || 'main' }}
+          repository: Alula-Framework/alula
+          ref: ${{ inputs.alula_ref || 'main' }}
           token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
-          path: flight
+          path: alula
 
       - uses: actions/checkout@v4
         with:
-          repository: Flight-Framework/flight-data
-          ref: ${{ inputs.flight_data_ref || 'main' }}
+          repository: Alula-Framework/alula-data
+          ref: ${{ inputs.alula_data_ref || 'main' }}
           token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
-          path: flight-data
+          path: alula-data
 
       - uses: actions/checkout@v4
         with:
-          repository: Flight-Framework/hangar
+          repository: Alula-Framework/hangar
           token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
           path: Hangar/hangar
 
       - uses: actions/checkout@v4
         with:
-          repository: Flight-Framework/swift-changeset
+          repository: Alula-Framework/swift-changeset
           token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
           path: Data/swift-changeset
 
@@ -119,7 +119,7 @@ jobs:
       # to verify them at all; after it, it is what catches a break before
       # the release rather than after.
       - name: Verify template
-        working-directory: flight-cli
+        working-directory: alula-cli
         run: ./CI/verify-templates.sh ${{ matrix.tier }}
 
   tutorial:
@@ -137,8 +137,8 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          repository: Flight-Framework/flight-cli
-          ref: ${{ inputs.flight_ref != '' && 'main' || github.sha }}
+          repository: Alula-Framework/alula-cli
+          ref: ${{ inputs.alula_ref != '' && 'main' || github.sha }}
 
       # Cheap, and it catches the failure that actually happened last time:
       # a tutorial telling you to create files that no longer exist.
@@ -153,7 +153,7 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_PASSWORD: flight
+          POSTGRES_PASSWORD: alula
           POSTGRES_DB: migrationcheck
         options: >-
           --health-cmd pg_isready --health-interval 10s
@@ -169,31 +169,31 @@ jobs:
 
       # Checked out as siblings so the generated projects can be built
       # against the commit under review. This job used to check out only
-      # flight-cli, so everything it built resolved flight and flight-data
+      # alula-cli, so everything it built resolved alula and alula-data
       # from their published tags — including when a caller passed
-      # `flight_ref`, which it accepted and then ignored. A breaking change
-      # in flight passed this job every single time.
+      # `alula_ref`, which it accepted and then ignored. A breaking change
+      # in alula passed this job every single time.
       - uses: actions/checkout@v4
         with:
-          repository: Flight-Framework/flight-cli
-          ref: ${{ inputs.flight_ref != '' && 'main' || github.sha }}
-          path: flight-cli
+          repository: Alula-Framework/alula-cli
+          ref: ${{ inputs.alula_ref != '' && 'main' || github.sha }}
+          path: alula-cli
 
       - uses: actions/checkout@v4
         with:
-          repository: Flight-Framework/flight
-          ref: ${{ inputs.flight_ref || 'main' }}
+          repository: Alula-Framework/alula
+          ref: ${{ inputs.alula_ref || 'main' }}
           token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
-          path: flight
+          path: alula
 
       - uses: actions/checkout@v4
         with:
-          repository: Flight-Framework/flight-data
-          ref: ${{ inputs.flight_data_ref || 'main' }}
+          repository: Alula-Framework/alula-data
+          ref: ${{ inputs.alula_data_ref || 'main' }}
           token: ${{ secrets.SWIFTFLIGHT_CI_TOKEN }}
-          path: flight-data
+          path: alula-data
 
-      # flight and flight-data resolve their own dependencies by URL, so the
+      # alula and alula-data resolve their own dependencies by URL, so the
       # token is a rate-limit courtesy rather than a requirement.
       - name: Configure git
         run: |
@@ -203,39 +203,39 @@ jobs:
           git config --global --add safe.directory '*'
 
       - name: Unit tests
-        working-directory: flight-cli
+        working-directory: alula-cli
         run: swift test
 
       # The embedded copy of templates/ must match templates/ itself,
-      # or `flight new` emits something CI never verified.
+      # or `alula new` emits something CI never verified.
       - name: Embedded templates are current
-        working-directory: flight-cli
+        working-directory: alula-cli
         run: ./CI/generate-embedded-templates.sh --check
 
-      # Builds and tests what `flight new` actually emits — a different
+      # Builds and tests what `alula new` actually emits — a different
       # artifact from the templates, because the CLI rewrites names and paths.
       # Repoints the generated manifest at the checkouts above, so this proves
       # the change under review, not the last release.
       - name: Generated projects build and test
-        working-directory: flight-cli
+        working-directory: alula-cli
         run: ./CI/verify-generated-projects.sh
 
       # The migrate commands delegate to the project's own migrate executable,
       # so the only way to know the delegation works is to run it against a
       # real database.
       - name: Migrate commands work end to end
-        working-directory: flight-cli
+        working-directory: alula-cli
         env:
-          FLIGHT_TEST_DATABASE_URL: postgres://postgres:flight@postgres:5432/migrationcheck
+          ALULA_TEST_DATABASE_URL: postgres://postgres:alula@postgres:5432/migrationcheck
         run: ./CI/verify-migrate.sh
 
       # Runs the tutorial's checkpoints rather than only checking that the
       # names in them resolve. Two dead commands sat in a checkpoint for weeks
       # because nothing executed them.
       - name: Tutorial checkpoints run
-        working-directory: flight-cli
+        working-directory: alula-cli
         env:
-          FLIGHT_TEST_DATABASE_URL: postgres://postgres:flight@postgres:5432/migrationcheck
+          ALULA_TEST_DATABASE_URL: postgres://postgres:alula@postgres:5432/migrationcheck
         run: ./CI/verify-checkpoints.sh
 
   format:
@@ -245,8 +245,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: Flight-Framework/flight-cli
-          ref: ${{ inputs.flight_ref != '' && 'main' || github.sha }}
+          repository: Alula-Framework/alula-cli
+          ref: ${{ inputs.alula_ref != '' && 'main' || github.sha }}
 
       # Blocking, not advisory: this repository is clean, and the way to keep
       # it that way is to fail on the first violation rather than accumulate a
@@ -261,8 +261,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: Flight-Framework/flight-cli
-          ref: ${{ inputs.flight_ref != '' && 'main' || github.sha }}
+          repository: Alula-Framework/alula-cli
+          ref: ${{ inputs.alula_ref != '' && 'main' || github.sha }}
 
       # swiftly rather than swift-actions/setup-swift: this package declares
       # swift-tools-version 6.3, and setup-swift only indexes up to 6.2.

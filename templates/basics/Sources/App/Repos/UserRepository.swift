@@ -1,4 +1,4 @@
-import FlightDataPostgres
+import AlulaDataPostgres
 import Foundation
 
 /// Data access.
@@ -15,10 +15,10 @@ import Foundation
 struct UserRepository: UserRepositoryProtocol {
     /// The pool, registered by `PostgresDataModule<PrimaryDataSource>`.
     ///
-    /// `flight:hand-registered` tells the registration generator that this
+    /// `alula:hand-registered` tells the registration generator that this
     /// type is registered by a module rather than scanned from this target,
     /// so it does not warn about a component it cannot see.
-    // flight:hand-registered — PostgresDataModule registers the pool.
+    // alula:hand-registered — PostgresDataModule registers the pool.
     @Inject var pool: PostgresDataSource
 
     func all() async throws -> [User] {

@@ -1,4 +1,4 @@
-import FlightMigrate
+import AlulaMigrate
 import Foundation
 
 /// Migrations are ordinary Swift, discovered at build time by their filename

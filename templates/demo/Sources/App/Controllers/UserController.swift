@@ -1,7 +1,7 @@
 import Foundation
-import FlightCore
-import FlightWeb
-import FlightDataCore
+import AlulaCore
+import AlulaWeb
+import AlulaDataCore
 
 struct CreateUserRequest: Codable {
     let name: String

@@ -1,6 +1,6 @@
 import Foundation
-import FlightDataPostgres
-import FlightWeb
+import AlulaDataPostgres
+import AlulaWeb
 
 /// Failures this repository raises on its own behalf. Controllers map these
 /// onto HTTP; the repository stays free of any web vocabulary.
@@ -71,7 +71,7 @@ struct ChatRepository: RoomStore {
     /// work through `withRepo` and gives it back — there is no request-scoped
     /// connection, so "which connection is this query on" is answered by the
     /// bracket you can see rather than by a scope you cannot.
-    // flight:hand-registered — PostgresDataModule registers the pool.
+    // alula:hand-registered — PostgresDataModule registers the pool.
     @Inject var pool: PostgresDataSource
 
     // MARK: Associations

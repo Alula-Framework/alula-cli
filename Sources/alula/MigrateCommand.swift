@@ -9,16 +9,16 @@ struct Migrate: AsyncParsableCommand {
             Every argument is passed through to the project's migrate \
             executable, so the full command set is available:
 
-              flight migrate                    apply all pending migrations
-              flight migrate status             what is applied, what is pending
-              flight migrate status --json      the same, machine-readable
-              flight migrate create AddPosts    write a new timestamped migration
-              flight migrate rollback           revert the last migration
-              flight migrate rollback --steps 3
-              flight migrate rollback --to 20260101000000
-              flight migrate repair             re-checksum an edited migration
-              flight migrate --dry-run          print the SQL without running it
-              flight migrate --help             the full option list
+              alula migrate                    apply all pending migrations
+              alula migrate status             what is applied, what is pending
+              alula migrate status --json      the same, machine-readable
+              alula migrate create AddPosts    write a new timestamped migration
+              alula migrate rollback           revert the last migration
+              alula migrate rollback --steps 3
+              alula migrate rollback --to 20260101000000
+              alula migrate repair             re-checksum an edited migration
+              alula migrate --dry-run          print the SQL without running it
+              alula migrate --help             the full option list
 
             Migrations are Swift types in your package, discovered at build \
             time, so running them means building your project — a globally \
@@ -26,9 +26,9 @@ struct Migrate: AsyncParsableCommand {
             command builds and runs `migrate` for you.
 
             The connection URL comes from --database-url, then \
-            $FLIGHT_DATABASE_URL, then $DATABASE_URL.
+            $ALULA_DATABASE_URL, then $DATABASE_URL.
 
-            `flight migrate init` is handled here rather than passed through: \
+            `alula migrate init` is handled here rather than passed through: \
             it adds the migration targets to a project that has none.
             """
     )

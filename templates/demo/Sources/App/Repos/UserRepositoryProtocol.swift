@@ -1,4 +1,4 @@
-import FlightDataPostgres
+import AlulaDataPostgres
 import Foundation
 
 /// The seam `UserService` depends on instead of the concrete, Postgres-bound

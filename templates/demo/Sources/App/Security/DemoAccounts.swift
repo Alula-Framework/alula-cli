@@ -1,20 +1,20 @@
-import FlightCore
-import FlightSecurityCore
+import AlulaCore
+import AlulaSecurityCore
 
 /// The accounts the demo's password sign-in checks against.
 ///
 /// In memory, seeded at startup, so the demo runs with nothing to set up. A
 /// real application implements `CredentialStore` over its own users table —
 /// two methods, find by identifier and save a stronger hash — and provides
-/// that here instead; see Docs/sign-in.md in flight. Subjects are opaque ids,
+/// that here instead; see Docs/sign-in.md in alula. Subjects are opaque ids,
 /// never the email address: when this application moves to an identity
 /// provider, the subject is what every row keyed by user survives on.
 ///
 /// Its own module for the same reason `DemoAuthModule` is: `SessionController`
 /// injects the sign-in provider, which makes the provider — and so this store
 /// behind it — a root of the component graph, and `AppModule` takes the graph.
-struct DemoAccountsModule: FlightModule {
-    /// Matched by type to `FlightPasswordSignInModule`'s `store:`.
+struct DemoAccountsModule: AlulaModule {
+    /// Matched by type to `AlulaPasswordSignInModule`'s `store:`.
     let credentialStore: any CredentialStore
 
     init(configuration: Configuration) throws {
@@ -40,6 +40,6 @@ struct DemoAccountsModule: FlightModule {
     }
 
     init() {
-        preconditionFailure("DemoAccountsModule is built by flightComposeModules.")
+        preconditionFailure("DemoAccountsModule is built by alulaComposeModules.")
     }
 }

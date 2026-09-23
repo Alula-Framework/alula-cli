@@ -63,9 +63,9 @@ struct ProjectName {
         ] {
             out = out.replacingOccurrences(of: needle, with: replacement)
         }
-        // flight.yaml's `app.name`, which is a value rather than an identifier
+        // alula.yaml's `app.name`, which is a value rather than an identifier
         // and so is not quoted in the file.
-        if path == "flight.yaml" {
+        if path == "alula.yaml" {
             out = out.replacingOccurrences(of: "  name: App\n", with: "  name: \(value)\n")
         }
         return out

@@ -1,6 +1,6 @@
 import Testing
 
-@testable import flight
+@testable import alula
 
 /// The rename rules, tested directly.
 ///
@@ -34,7 +34,7 @@ struct ProjectNameTests {
         // Targets that are not the app module are untouched.
         #expect(p.path("Sources/Migrations/1_A.swift") == "Sources/Migrations/1_A.swift")
         #expect(p.path("Sources/migrate/Migrate.swift") == "Sources/migrate/Migrate.swift")
-        #expect(p.path("flight.yaml") == "flight.yaml")
+        #expect(p.path("alula.yaml") == "alula.yaml")
     }
 
     @Test("manifest strings and imports are rewritten")
@@ -60,11 +60,11 @@ struct ProjectNameTests {
         #expect(p.contents(prose, path: "Main.swift") == prose)
     }
 
-    @Test("flight.yaml's app name is a value, not a quoted identifier")
+    @Test("alula.yaml's app name is a value, not a quoted identifier")
     func yaml() throws {
         let p = try ProjectName("MyService")
         let yaml = "app:\n  name: App\n\nserver:\n  port: 8080\n"
-        #expect(p.contents(yaml, path: "flight.yaml").contains("  name: MyService\n"))
+        #expect(p.contents(yaml, path: "alula.yaml").contains("  name: MyService\n"))
         // The same text in any other file is not a name declaration.
         #expect(p.contents(yaml, path: "README.md").contains("  name: App\n"))
     }

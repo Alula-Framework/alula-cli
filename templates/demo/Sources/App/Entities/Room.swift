@@ -1,6 +1,6 @@
 import Foundation
-import FlightDataPostgres
-import FlightWeb
+import AlulaDataPostgres
+import AlulaWeb
 
 /// A chat room. The parent side of the demo's one-to-many: one room, many
 /// messages, reached with `.preload(\.messages)`.

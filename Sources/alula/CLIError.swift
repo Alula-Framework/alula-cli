@@ -25,14 +25,14 @@ enum CLIError: Error, CustomStringConvertible {
         case .notAPackage(let path):
             return """
                 no Package.swift found in \(path) or any parent directory. \
-                Run this from inside a Flight project.
+                Run this from inside an Alula project.
                 """
         case .noMigrateExecutable(let path):
             return """
                 \(path) has no 'migrate' executable target, so there is nothing \
                 to run migrations with. Add one with:
 
-                    flight migrate init
+                    alula migrate init
                 """
         case .delegateFailed(let code):
             return "migrate exited with status \(code)"

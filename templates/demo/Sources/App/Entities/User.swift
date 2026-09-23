@@ -1,6 +1,6 @@
 import Foundation
-import FlightDataPostgres
-import FlightWeb
+import AlulaDataPostgres
+import AlulaWeb
 
 // MARK: - Entities (Hangar @Entity — hangar-design §4)
 

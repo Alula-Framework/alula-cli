@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Builds and tests every template tier. This is the anti-drift mechanism: a
-# breaking change in flight or flight-data fails here, not in a new user's
+# breaking change in alula or alula-data fails here, not in a new user's
 # first ten minutes.
 #
 # Templates ship URL dependencies, because that is what a downloaded project
@@ -11,13 +11,13 @@
 # what gets built; the template is never modified.
 #
 #   ./CI/verify-templates.sh                 # against sibling checkouts
-#   FLIGHT_LOCAL=0 ./CI/verify-templates.sh  # against the published tags
+#   ALULA_LOCAL=0 ./CI/verify-templates.sh  # against the published tags
 #
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
-flight_root="$(cd "$here/.." && pwd)"
-use_local="${FLIGHT_LOCAL:-1}"
+alula_root="$(cd "$here/.." && pwd)"
+use_local="${ALULA_LOCAL:-1}"
 failed=0
 scratch="$(mktemp -d)"
 # Kept on failure so the `full log:` line points at something that exists.
@@ -48,7 +48,7 @@ for tier in "${tiers[@]}"; do
   if [ "$use_local" = "1" ]; then
     # Point the copy's dependencies at the sibling checkouts. Shared with
     # verify-generated-projects.sh, which needs exactly the same rewrite.
-    python3 "$here/CI/repoint-manifest.py" "$work/Package.swift" "$flight_root"
+    python3 "$here/CI/repoint-manifest.py" "$work/Package.swift" "$alula_root"
   fi
 
   # Full output to a log; the terminal gets the tail on success and the

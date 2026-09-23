@@ -1,6 +1,6 @@
-import FlightCore
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaWeb
+import AlulaWebTesting
 import Foundation
 import Testing
 @testable import App
@@ -85,11 +85,11 @@ struct UserControllerTests {
 struct UserRoutesEndToEndTests {
 
     private func client(_ repository: MockUserRepository) throws -> TestClient {
-        // `flightRoutes` is generated alongside the per-route factories and
+        // `alulaRoutes` is generated alongside the per-route factories and
         // returns all of them, so nothing here names a route by position — add
         // a route to the controller and this keeps working unchanged.
         try TestClient(
-            routes: UserController.flightRoutes { _ in
+            routes: UserController.alulaRoutes { _ in
                 UserController(users: UserService(repository: repository))
             })
     }

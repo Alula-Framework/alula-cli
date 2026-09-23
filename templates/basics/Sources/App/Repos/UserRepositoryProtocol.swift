@@ -1,4 +1,4 @@
-import FlightDataPostgres
+import AlulaDataPostgres
 import Foundation
 
 /// The seam the rest of the application depends on instead of the concrete,

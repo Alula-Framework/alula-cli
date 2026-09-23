@@ -1,6 +1,6 @@
-import FlightCore
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaWeb
+import AlulaWebTesting
 import Foundation
 import Testing
 @testable import App
@@ -14,7 +14,7 @@ struct AttachmentControllerTests {
     @Test("a file and its form fields arrive, sizes intact")
     func uploadRoundTrip() async throws {
         let client = try TestClient(
-            routes: AttachmentController.flightRoutes { _ in AttachmentController() })
+            routes: AttachmentController.alulaRoutes { _ in AttachmentController() })
 
         let boundary = "----DemoBoundary"
         let filePayload = String(repeating: "b", count: 50_000)
@@ -50,7 +50,7 @@ struct AttachmentControllerTests {
     @Test("a body that is not multipart is refused as a 415")
     func nonMultipartRefused() async throws {
         let client = try TestClient(
-            routes: AttachmentController.flightRoutes { _ in AttachmentController() })
+            routes: AttachmentController.alulaRoutes { _ in AttachmentController() })
         let response = await client.post(
             "/attachments",
             headers: [.contentType: "application/json"],

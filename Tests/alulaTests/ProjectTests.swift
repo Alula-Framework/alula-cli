@@ -1,14 +1,14 @@
 import Foundation
 import Testing
 
-@testable import flight
+@testable import alula
 
 @Suite("Locating the project")
 struct ProjectTests {
 
     private func scratch() throws -> URL {
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("flight-cli-\(UUID().uuidString)")
+            .appendingPathComponent("alula-cli-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
@@ -21,7 +21,7 @@ struct ProjectTests {
         let nested = root.appendingPathComponent("Sources/App/Controllers")
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
 
-        // Running `flight migrate` from anywhere inside a project should work,
+        // Running `alula migrate` from anywhere inside a project should work,
         // the way git does.
         // Compared by path, not by URL: Foundation gives a directory URL a
         // trailing slash when the directory exists, so file:///a/b/ and

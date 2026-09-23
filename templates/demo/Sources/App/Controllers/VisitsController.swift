@@ -1,5 +1,5 @@
-import FlightCore
-import FlightWeb
+import AlulaCore
+import AlulaWeb
 
 /// The room a browser last opened, remembered in its session.
 ///

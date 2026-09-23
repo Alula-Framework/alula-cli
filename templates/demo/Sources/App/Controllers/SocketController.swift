@@ -1,7 +1,7 @@
-import FlightChannels
-import FlightCore
-import FlightSecurityCore
-import FlightWeb
+import AlulaChannels
+import AlulaCore
+import AlulaSecurityCore
+import AlulaWeb
 
 /// The WebSocket entry point, as a route like any other.
 ///
@@ -27,14 +27,14 @@ struct SocketController {
     /// correctly: the scanner can't see a module-provided value, so an unmarked
     /// @Inject of a type it never found as a @Component is usually a missing
     /// dependency that would fail composition.
-    // flight:hand-registered
+    // alula:hand-registered
     @Inject var validator: any TokenValidator
 
     /// The channels stack, injected as one value. It used to be built with
     /// `ChannelSocketHandler(context:)`, which resolved the router, the bus
     /// and the channels configuration out of every upgrade request — three
     /// lookups of things the composition root wired at start-up.
-    // flight:hand-registered
+    // alula:hand-registered
     @Inject var sockets: ChannelSockets
 
     /// The upgrade request is where identity is established — before the

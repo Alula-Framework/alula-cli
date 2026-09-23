@@ -1,38 +1,38 @@
-# Flight CLI
+# Alula CLI
 
-The `flight` command, the starter templates it emits, and the tutorial that
+The `alula` command, the starter templates it emits, and the tutorial that
 builds them.
 
 ## Install
 
 ```bash
-git clone https://github.com/Flight-Framework/flight-cli.git
-cd flight-cli
+git clone https://github.com/Alula-Framework/alula-cli.git
+cd alula-cli
 swift build -c release
-cp .build/release/flight ~/.local/bin/
+cp .build/release/alula ~/.local/bin/
 ```
 
 Requires Swift 6.3 or later. The CLI itself depends only on
 swift-argument-parser and builds anywhere Swift 6.3 does.
 
-The projects it *emits* are a separate question: they depend on `flight`, so
+The projects it *emits* are a separate question: they depend on `alula`, so
 building one on a Mac needs the **macOS 26 SDK (Xcode 26)**. That is a build
 requirement, not a deployment one — what you build still runs on macOS 15. See
-[flight's README](https://github.com/Flight-Framework/flight#requirements) for
+[alula's README](https://github.com/Alula-Framework/alula#requirements) for
 why. On Linux, Swift 6.3 is the only requirement.
 
 ## Create a project
 
 ```bash
-flight new MyService                  # skeleton
-flight new MyService --tier basics    # with a database
-flight new MyService --tier demo      # everything
+alula new MyService                  # skeleton
+alula new MyService --tier basics    # with a database
+alula new MyService --tier demo      # everything
 ```
 
 The tier chooses the code; `--with` chooses the dependencies:
 
 ```bash
-flight new MyService --tier basics --with postgres,valkey
+alula new MyService --tier basics --with postgres,valkey
 ```
 
 `postgres`, `valkey` and `security` are the options, and each maps to a
@@ -46,19 +46,19 @@ byte-for-byte what CI built and tested — with the target renamed to yours.
 ## Run migrations
 
 ```bash
-flight migrate                    # apply everything pending
-flight migrate status             # what is applied, what is not
-flight migrate status --json      # the same, machine-readable
-flight migrate create AddPosts    # write a new timestamped migration
-flight migrate rollback           # revert the last one
-flight migrate rollback --steps 3
-flight migrate rollback --to 20260101000000
-flight migrate repair             # re-checksum an edited migration
-flight migrate --dry-run          # print the SQL without running it
-flight migrate --help             # the full option list
+alula migrate                    # apply everything pending
+alula migrate status             # what is applied, what is not
+alula migrate status --json      # the same, machine-readable
+alula migrate create AddPosts    # write a new timestamped migration
+alula migrate rollback           # revert the last one
+alula migrate rollback --steps 3
+alula migrate rollback --to 20260101000000
+alula migrate repair             # re-checksum an edited migration
+alula migrate --dry-run          # print the SQL without running it
+alula migrate --help             # the full option list
 ```
 
-The connection URL comes from `--database-url`, then `$FLIGHT_DATABASE_URL`,
+The connection URL comes from `--database-url`, then `$ALULA_DATABASE_URL`,
 then `$DATABASE_URL`.
 
 Every argument is passed through to the project's migrate executable, so the
@@ -74,7 +74,7 @@ A project without migration targets — anything started from `skeleton` — get
 them with:
 
 ```bash
-flight migrate init
+alula migrate init
 ```
 
 ## Pick a starting point
@@ -85,7 +85,7 @@ flight migrate init
 | [`basics`](templates/basics) | A service with a database | + entities, migrations, a repository, CRUD |
 | [`demo`](templates/demo) | Reading, not starting from | + PubSub, Channels, Presence, caching, auth, the full query tour |
 
-`flight new` emits one of these with your project's name substituted. You can
+`alula new` emits one of these with your project's name substituted. You can
 also copy a directory by hand — each is a working project with passing tests.
 
 ## Or follow the tutorial
@@ -108,12 +108,12 @@ prose that slowly stops matching the code.
 ./CI/verify-templates.sh basics     # or just one
 ./CI/verify-tutorial.sh             # every path, symbol and type the tutorial names
 ./CI/verify-checkpoints.sh          # run the tutorial's checkpoint commands for real
-./CI/verify-generated-projects.sh   # build and test what `flight new` emits
+./CI/verify-generated-projects.sh   # build and test what `alula new` emits
 ./CI/verify-migrate.sh              # the migrate command surface, end to end
 ./CI/generate-embedded-templates.sh # re-embed after changing templates/
 ```
 
-`flight new`'s output is verified separately from the templates because it is
+`alula new`'s output is verified separately from the templates because it is
 a different artifact: the CLI renames the target and rewrites manifest
 strings, imports, and paths, and any of that can be wrong in a way the
 templates themselves would never reveal.
@@ -121,10 +121,10 @@ templates themselves would never reveal.
 Templates ship URL dependencies, because that is what a downloaded project
 must contain. `verify-templates.sh` copies each tier to a scratch directory
 and rewrites those to local paths before building, so the tiers can be
-checked against working copies of `flight` and `flight-data` — the templates
+checked against working copies of `alula` and `alula-data` — the templates
 themselves are never modified.
 
-CI runs all of them, and `flight` and `flight-data` call this workflow, so a
+CI runs all of them, and `alula` and `alula-data` call this workflow, so a
 breaking change there fails on the pull request that caused it rather than in
 someone's first ten minutes with a downloaded project.
 

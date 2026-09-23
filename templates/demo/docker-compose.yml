@@ -3,7 +3,7 @@
 #     docker compose up -d
 #
 # The credentials, port and database name below match `datasource.primary.url`
-# in flight.yaml exactly, so `swift run` works immediately after this comes up
+# in alula.yaml exactly, so `swift run` works immediately after this comes up
 # with nothing else to configure.
 #
 # Port 55432, not 5432, deliberately: a Postgres already installed on the host
@@ -15,8 +15,8 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_PASSWORD: flight
-      POSTGRES_DB: flight_demo
+      POSTGRES_PASSWORD: alula
+      POSTGRES_DB: alula_demo
     ports:
       - '127.0.0.1:55432:5432'
     volumes:
@@ -28,7 +28,7 @@ services:
     # `depends_on: condition: service_healthy` in your own services, and
     # `docker compose up --wait`, both rely on this.
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres -d flight_demo']
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d alula_demo']
       interval: 2s
       timeout: 3s
       retries: 15
@@ -42,11 +42,11 @@ volumes:
 # empties a table would take your development data with it. Create a separate
 # one on this same server, once:
 #
-#     docker compose exec postgres createdb -U postgres flight_demo_test
+#     docker compose exec postgres createdb -U postgres alula_demo_test
 #
 # then point the tests at it, e.g.
 #
-#     export DATABASE_URL="postgres://postgres:flight@127.0.0.1:55432/flight_demo_test?sslmode=disable"
+#     export DATABASE_URL="postgres://postgres:alula@127.0.0.1:55432/alula_demo_test?sslmode=disable"
 #
 # The tests this project ships need no database at all. Controllers and services
 # are built with fakes and asserted on directly, channels run over an in-memory

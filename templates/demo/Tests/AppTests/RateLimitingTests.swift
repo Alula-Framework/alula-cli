@@ -1,9 +1,9 @@
-import FlightCore
-import FlightRateLimit
-import FlightRateLimitTesting
-import FlightSecurityCore
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaRateLimit
+import AlulaRateLimitTesting
+import AlulaSecurityCore
+import AlulaWeb
+import AlulaWebTesting
 import HTTPTypes
 import Testing
 
@@ -20,7 +20,7 @@ struct RateLimitingTests {
     /// The demo's own key rule, with a quota small enough to reach in a test.
     private func client(quota: RateLimitQuota = .perMinute(2)) throws -> TestClient {
         let validator: any TokenValidator = DemoTokenValidator()
-        let security = FlightSecurityModule(validator: validator)
+        let security = AlulaSecurityModule(validator: validator)
         let limiting = RateLimiting(store: store, quota: quota) { context in
             context.principal?.subject ?? context.clientAddress?.host ?? "unknown"
         }

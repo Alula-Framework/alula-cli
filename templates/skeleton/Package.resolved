@@ -20,9 +20,9 @@
       }
     },
     {
-      "identity" : "flight",
+      "identity" : "alula",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Flight-Framework/flight.git",
+      "location" : "https://github.com/Alula-Framework/alula.git",
       "state" : {
         "revision" : "5ae30ae99672684fa843d40f0a2a2b614d3e019c",
         "version" : "0.18.0"

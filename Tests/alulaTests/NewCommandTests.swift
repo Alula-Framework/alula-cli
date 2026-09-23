@@ -1,11 +1,11 @@
 import Foundation
 import Testing
 
-@testable import flight
+@testable import alula
 
 @Suite("Next-steps output")
 struct NextStepsTests {
-    /// The commands `flight new` prints must be commands that exist.
+    /// The commands `alula new` prints must be commands that exist.
     ///
     /// It printed `swift run migrate up` for weeks. `up` is not a
     /// subcommand — it is `apply` — so the very first thing a new project was
@@ -16,7 +16,7 @@ struct NextStepsTests {
     func suggestsRealMigrateSubcommand() throws {
         let source = try String(
             contentsOf: Self.packageRoot().appendingPathComponent(
-                "Sources/flight/NewCommand.swift"), encoding: .utf8)
+                "Sources/alula/NewCommand.swift"), encoding: .utf8)
         let suggested =
             source
             .split(separator: "\n")
@@ -29,7 +29,7 @@ struct NextStepsTests {
             .filter { !$0.isEmpty }
 
         #expect(!suggested.isEmpty, "no migrate suggestion found — did the output change?")
-        // Mirrors FlightMigrateCLI's subcommand list.
+        // Mirrors AlulaMigrateCLI's subcommand list.
         let real: Set<String> = ["apply", "status", "rollback", "create", "repair"]
         for command in suggested {
             #expect(real.contains(command), "`swift run migrate \(command)` is not a subcommand")

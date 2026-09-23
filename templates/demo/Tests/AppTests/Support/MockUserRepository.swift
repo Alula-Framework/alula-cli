@@ -1,5 +1,5 @@
-import FlightCore
-import FlightDataPostgres
+import AlulaCore
+import AlulaDataPostgres
 import Foundation
 import Synchronization
 @testable import App

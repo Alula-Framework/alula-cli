@@ -20,18 +20,18 @@
       }
     },
     {
-      "identity" : "flight",
+      "identity" : "alula",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Flight-Framework/flight.git",
+      "location" : "https://github.com/Alula-Framework/alula.git",
       "state" : {
         "revision" : "4bff63ea8515021a4f40712a50fe7e9f3ba8a55e",
         "version" : "0.17.0"
       }
     },
     {
-      "identity" : "flight-data",
+      "identity" : "alula-data",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Flight-Framework/flight-data.git",
+      "location" : "https://github.com/Alula-Framework/alula-data.git",
       "state" : {
         "revision" : "04b80fb6a97badbd4362877a5857b832b86f5076",
         "version" : "0.6.0"
@@ -40,7 +40,7 @@
     {
       "identity" : "hangar",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Flight-Framework/hangar.git",
+      "location" : "https://github.com/Alula-Framework/hangar.git",
       "state" : {
         "revision" : "3b8df246f8e755c8efa29196a43ddb114bf17f0a",
         "version" : "0.5.1"
@@ -130,7 +130,7 @@
     {
       "identity" : "swift-changeset",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Flight-Framework/swift-changeset.git",
+      "location" : "https://github.com/Alula-Framework/swift-changeset.git",
       "state" : {
         "revision" : "978c9b504072760bc002f793acd041930d628739",
         "version" : "0.2.0"

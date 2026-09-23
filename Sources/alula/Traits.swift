@@ -14,9 +14,9 @@ enum Capability: String, CaseIterable, Sendable {
     /// `(package identity, trait name)`.
     var trait: (package: String, name: String) {
         switch self {
-        case .postgres: ("flight-data", "Postgres")
-        case .valkey: ("flight-data", "Valkey")
-        case .security: ("flight", "Security")
+        case .postgres: ("alula-data", "Postgres")
+        case .valkey: ("alula-data", "Valkey")
+        case .security: ("alula", "Security")
         }
     }
 
@@ -55,19 +55,19 @@ struct TraitRewriter {
 
     func rewrite(_ manifest: String) -> String {
         var result = manifest
-        for package in ["flight", "flight-data"] {
+        for package in ["alula", "alula-data"] {
             let wanted =
                 capabilities
                 .filter { $0.trait.package == package }
                 .map(\.trait.name)
                 .sorted()
 
-            // `flight`'s Web trait is not optional in any template: every tier
+            // `alula`'s Web trait is not optional in any template: every tier
             // serves HTTP, and Security implies Web anyway.
             var names = wanted
-            if package == "flight" && !names.contains("Security") {
+            if package == "alula" && !names.contains("Security") {
                 names = ["Web"]
-            } else if package == "flight" {
+            } else if package == "alula" {
                 names = ["Security"]
             }
 
@@ -80,7 +80,7 @@ struct TraitRewriter {
     private static func replacingTraits(
         in manifest: String, package: String, with names: [String]
     ) -> String {
-        let marker = "Flight-Framework/\(package).git"
+        let marker = "Alula-Framework/\(package).git"
         var lines = manifest.split(separator: "\n", omittingEmptySubsequences: false).map(
             String.init)
         guard let index = lines.firstIndex(where: { $0.contains(marker) }) else { return manifest }
@@ -118,7 +118,7 @@ extension Capability {
     ///
     /// `--with` chooses dependencies; the tier chooses code. A `basics`
     /// project whose manifest drops Postgres still imports
-    /// `FlightDataPostgres`, so the combination has to be refused rather
+    /// `AlulaDataPostgres`, so the combination has to be refused rather
     /// than emitted — a generated project that does not build is the worst
     /// thing this command can produce.
     static func required(byTier tier: String) -> Set<Capability> {

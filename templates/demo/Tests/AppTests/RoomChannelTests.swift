@@ -1,4 +1,4 @@
-import FlightChannelsProtocol
+import AlulaChannelsProtocol
 import Foundation
 import Testing
 

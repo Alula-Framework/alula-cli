@@ -1,4 +1,4 @@
-import FlightMigrate
+import AlulaMigrate
 
 /// Turns the flat `messages` table into a small graph, so the demo can show
 /// the query shapes a real application actually needs: rooms holding many

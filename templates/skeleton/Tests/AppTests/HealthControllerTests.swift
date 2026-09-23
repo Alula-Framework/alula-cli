@@ -1,6 +1,6 @@
-import FlightCore
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaWeb
+import AlulaWebTesting
 import Testing
 
 @testable import App
@@ -14,10 +14,10 @@ struct HealthControllerTests {
     @Test("the index route answers with the configured application name")
     func index() async throws {
         // The composition root's sequence, by hand: build the graph, then the
-        // routes from it — the values `FlightWebModule` is composed with.
+        // routes from it — the values `AlulaWebModule` is composed with.
         let configuration = Configuration(values: ["app.name": "TestApp"])
-        let graph = try FlightGraph(configuration: configuration)
-        let client = try TestClient(routes: flightRoutes(graph))
+        let graph = try AlulaGraph(configuration: configuration)
+        let client = try TestClient(routes: alulaRoutes(graph))
 
         let response = await client.get("/")
 

@@ -1,7 +1,7 @@
-import FlightCore
-import FlightDataPostgres
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaDataPostgres
+import AlulaWeb
+import AlulaWebTesting
 import Testing
 
 @testable import App
@@ -26,11 +26,11 @@ struct HealthControllerTests {
         // The composition root's sequence, by hand: the pool is a graph root,
         // the graph is built from it, and AppModule registers from the graph.
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
-        let graph = try FlightGraph(
+        let graph = try AlulaGraph(
             configuration: configuration, postgresDataSource: postgres.dataSource)
-        // Routes are values the composition root hands to `FlightWebModule`,
+        // Routes are values the composition root hands to `AlulaWebModule`,
         // so a client that serves them is built from the same graph.
-        let client = try TestClient(routes: flightRoutes(graph))
+        let client = try TestClient(routes: alulaRoutes(graph))
 
         let response = await client.get("/")
 

@@ -1,14 +1,14 @@
-import FlightActuator
-import FlightChannels
-import FlightCache
-import FlightCore
-import FlightRateLimit
-import FlightDataPostgres
-import FlightPresence
-import FlightPubSub
-import FlightSecurityCore
-import FlightTransport
-import FlightWeb
+import AlulaActuator
+import AlulaChannels
+import AlulaCache
+import AlulaCore
+import AlulaRateLimit
+import AlulaDataPostgres
+import AlulaPresence
+import AlulaPubSub
+import AlulaSecurityCore
+import AlulaTransport
+import AlulaWeb
 import Testing
 
 @testable import App
@@ -27,30 +27,30 @@ struct BootstrapTests {
     /// transport (binding a socket is not what is under test here): what the
     /// graph needs, then the graph, then what is built from it, then assemble.
     /// Returns the graph so a test can confirm which components it built.
-    private func boot() throws -> FlightGraph {
+    private func boot() throws -> AlulaGraph {
         let configuration = Configuration(values: [
             "app.name": "App",
             "datasource.primary.url": "postgres://localhost/unused",
         ])
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
         let auth = DemoAuthModule()
-        let pubsub = try FlightPubSubModule(configuration: configuration)
+        let pubsub = try AlulaPubSubModule(configuration: configuration)
         // Only what a *component* needs is a graph root. Values a route terminal
         // alone needs — the broadcaster, the socket stack, the validator — are
-        // parameters of `flightRoutes`, which keeps the graph free of Channels
+        // parameters of `alulaRoutes`, which keeps the graph free of Channels
         // and so lets channels be built from the graph.
-        let graph = try FlightGraph(
+        let graph = try AlulaGraph(
             configuration: configuration, postgresDataSource: postgres.dataSource)
-        let presenceModule = try FlightPresenceModule(
+        let presenceModule = try AlulaPresenceModule(
             configuration: configuration, localBus: pubsub.local, gossipBus: pubsub.bus)
         let demoChannels = DemoChannelsModule(
             graph: graph, presence: presenceModule.presence)
-        let channels = try FlightChannelsModule(
+        let channels = try AlulaChannelsModule(
             bus: pubsub.bus, configuration: configuration, channels: demoChannels.channels)
         // Assembling every module is the value-model equivalent of freezing the
         // container: the graph already built every component eagerly above, and
         // assemble seeds health and collects services over the whole set.
-        _ = try Flight.assemble(
+        _ = try Alula.assemble(
             configuration: configuration,
             modules: [
                 postgres,
@@ -59,14 +59,14 @@ struct BootstrapTests {
                 demoChannels,
                 channels,
                 AppModule(graph: graph, limiter: RateLimiter(store: InMemoryRateLimitStore())),
-                FlightSecurityModule(validator: auth.tokenValidator),
-                try FlightPasswordSignInModule(
+                AlulaSecurityModule(validator: auth.tokenValidator),
+                try AlulaPasswordSignInModule(
                     configuration: configuration,
                     store: DemoAccountsModule(configuration: configuration).credentialStore,
                     limiter: RateLimiter(store: InMemoryRateLimitStore())),
                 ActuatorModule(),
                 presenceModule,
-                try FlightCacheModule(configuration: configuration),
+                try AlulaCacheModule(configuration: configuration),
             ])
         return graph
     }
@@ -78,7 +78,7 @@ struct BootstrapTests {
 
     @Test("the demo's own token validator is the one composed in")
     func bringYourOwnAuth() throws {
-        // The app supplies its validator by value to `FlightSecurityModule`;
+        // The app supplies its validator by value to `AlulaSecurityModule`;
         // nothing looks up an OIDC default, so no `security.oidc.*` is demanded.
         let auth = DemoAuthModule()
         #expect(auth.tokenValidator is DemoTokenValidator)

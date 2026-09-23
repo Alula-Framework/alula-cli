@@ -1,8 +1,8 @@
-import FlightCore
-import FlightWeb
+import AlulaCore
+import AlulaWeb
 import Foundation
 
-/// File upload, both halves of flight 0.7.0 at once: the handler takes
+/// File upload, both halves of alula 0.7.0 at once: the handler takes
 /// `body: RequestBodyStream`, so the transport hands bytes through as they
 /// arrive instead of buffering the request — that (plus `maxBodyBytes:`
 /// overriding the global cap for just this route) is what lets an upload

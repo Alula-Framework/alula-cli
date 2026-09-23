@@ -1,5 +1,5 @@
-import FlightMigrate
-import FlightMigrateCLI
+import AlulaMigrate
+import AlulaMigrateCLI
 import Migrations
 
 @main

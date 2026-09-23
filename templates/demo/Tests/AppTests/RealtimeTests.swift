@@ -1,14 +1,14 @@
-import FlightChannels
-import FlightChannelsClient
-import FlightChannelsProtocol
-import FlightChannelsTesting
-import FlightCore
-import FlightPresence
-import FlightPresenceClient
-import FlightPubSub
-import FlightSecurityCore
-import FlightWeb
-import FlightWebTesting
+import AlulaChannels
+import AlulaChannelsClient
+import AlulaChannelsProtocol
+import AlulaChannelsTesting
+import AlulaCore
+import AlulaPresence
+import AlulaPresenceClient
+import AlulaPubSub
+import AlulaSecurityCore
+import AlulaWeb
+import AlulaWebTesting
 import Foundation
 import Testing
 
@@ -19,7 +19,7 @@ import Testing
 /// real Presence CRDT. Only the database is faked.
 ///
 /// This is the suite that proves the thing the demo previously only claimed —
-/// that a chat app built on Flight actually delivers messages and presence to
+/// that a chat app built on Alula actually delivers messages and presence to
 /// the people in the room.
 /// Holds the demo's room channel, built from a fake store and the shared
 /// presence — the same shape `AppModule`/`DemoChannelsModule` use, a value
@@ -52,24 +52,24 @@ private struct Harness {
     init(store: FakeRoomStore) throws {
         self.store = store
         let configuration = Configuration(values: [
-            "flight.channels.heartbeat-check-interval-seconds": "0.05"
+            "alula.channels.heartbeat-check-interval-seconds": "0.05"
         ])
         // The wiring, written out: PubSub's bus and this module's declared
         // channels are what Channels is built from.
-        let pubsub = try FlightPubSubModule(configuration: configuration)
+        let pubsub = try AlulaPubSubModule(configuration: configuration)
         // No adapter: a single-node test, stated rather than discovered.
-        let presenceModule = try FlightPresenceModule(
+        let presenceModule = try AlulaPresenceModule(
             configuration: configuration, localBus: pubsub.local, gossipBus: pubsub.bus)
         let presence = presenceModule.presence
         let realtime = RealtimeModule(store: store, presence: presence)
-        let channels = try FlightChannelsModule(
+        let channels = try AlulaChannelsModule(
             bus: pubsub.bus, configuration: configuration, channels: realtime.channels)
         // The real route the application ships (`SocketController`), built the
-        // way `flightRoutes` builds it: the validator by value, the channels
+        // way `alulaRoutes` builds it: the validator by value, the channels
         // stack from the channels module. This is what exercises the upgrade
         // path users actually get.
         let sockets = channels.sockets
-        let socketRoutes = SocketController.flightRoutes { _ in
+        let socketRoutes = SocketController.alulaRoutes { _ in
             SocketController(validator: DemoTokenValidator(), sockets: sockets)
         }
         self.testClient = try TestClient(routes: socketRoutes)
@@ -82,14 +82,14 @@ private struct Harness {
     func client(as subject: String, roles: String = "") -> ChannelClient {
         let token = roles.isEmpty ? "demo:\(subject)" : "demo:\(subject):\(roles)"
         return ChannelClient(
-            url: URL(string: "flight-test:///socket")!,
+            url: URL(string: "alula-test:///socket")!,
             transport: InMemoryChannelTransport(testClient: testClient, query: "token=\(token)"))
     }
 
     /// A client with no credential at all.
     func anonymousClient() -> ChannelClient {
         ChannelClient(
-            url: URL(string: "flight-test:///socket")!,
+            url: URL(string: "alula-test:///socket")!,
             transport: InMemoryChannelTransport(testClient: testClient))
     }
 }

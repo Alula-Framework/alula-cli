@@ -1,6 +1,6 @@
-import FlightCore
-import FlightWeb
-import FlightWebTesting
+import AlulaCore
+import AlulaWeb
+import AlulaWebTesting
 import Foundation
 import Testing
 
@@ -98,11 +98,11 @@ struct UserControllerTests {
 struct UserRoutesEndToEndTests {
 
     private func client(_ users: InMemoryUsers = InMemoryUsers([ada])) throws -> TestClient {
-        // `flightRoutes` is generated alongside the per-route factories and
+        // `alulaRoutes` is generated alongside the per-route factories and
         // returns all of them, so nothing here names a route by position — add
         // a route to the controller and this keeps working unchanged.
         return try TestClient(
-            routes: UserController.flightRoutes { _ in UserController(users: users) })
+            routes: UserController.alulaRoutes { _ in UserController(users: users) })
     }
 
     /// Status, headers and body shape — the three things a client actually

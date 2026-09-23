@@ -29,15 +29,15 @@
 # tells the reader about, which is why it lives in the block rather than in a
 # list maintained over here.
 #
-# Needs FLIGHT_TEST_DATABASE_URL for Part 2 onward. Skips those, loudly,
+# Needs ALULA_TEST_DATABASE_URL for Part 2 onward. Skips those, loudly,
 # without it.
 #
 set -uo pipefail
 cd "$(dirname "$0")/.."
 here="$(pwd)"
 
-swift build --product flight >/dev/null || exit 1
-cli="$(swift build --product flight --show-bin-path)/flight"
+swift build --product alula >/dev/null || exit 1
+cli="$(swift build --product alula --show-bin-path)/alula"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 
@@ -86,8 +86,8 @@ for f in "$scratch"/cp*.sh; do
   part=$(echo "$name" | sed -E 's/.*\.part([0-9]+)\.sh/\1/')
   tier=$(tier_for "$part")
 
-  if [ "$part" != "1" ] && [ -z "${FLIGHT_TEST_DATABASE_URL:-}" ]; then
-    echo "  ~ $name (Part $part) — skipped, no FLIGHT_TEST_DATABASE_URL"
+  if [ "$part" != "1" ] && [ -z "${ALULA_TEST_DATABASE_URL:-}" ]; then
+    echo "  ~ $name (Part $part) — skipped, no ALULA_TEST_DATABASE_URL"
     skipped=$((skipped + 1))
     continue
   fi
@@ -100,17 +100,17 @@ for f in "$scratch"/cp*.sh; do
   # The tutorial hardcodes a local database URL; CI's is elsewhere. Both of
   # these are needed, because the two halves read different sources:
   #
-  #   the migrate CLI  ->  $FLIGHT_DATABASE_URL   (it does not read flight.yaml)
-  #   the application  ->  flight.yaml            (it does not read that variable)
+  #   the migrate CLI  ->  $ALULA_DATABASE_URL   (it does not read alula.yaml)
+  #   the application  ->  alula.yaml            (it does not read that variable)
   #
   # Patching only the first is what made cp06 and cp08 fail: the app kept
   # dialling 127.0.0.1:55432, died on connection refused, and the curls in
   # those checkpoints were racing a socket that existed for a few
   # milliseconds between "transport listening" and the pool giving up.
-  if [ -n "${FLIGHT_TEST_DATABASE_URL:-}" ]; then
-    sed -i "s|^export FLIGHT_DATABASE_URL=.*|export FLIGHT_DATABASE_URL=$FLIGHT_TEST_DATABASE_URL|" "$f"
-    export FLIGHT_DATABASE_URL="$FLIGHT_TEST_DATABASE_URL"
-    sed -i "s|url: \"postgres://[^\"]*\"|url: \"$FLIGHT_TEST_DATABASE_URL\"|" "$work/flight.yaml"
+  if [ -n "${ALULA_TEST_DATABASE_URL:-}" ]; then
+    sed -i "s|^export ALULA_DATABASE_URL=.*|export ALULA_DATABASE_URL=$ALULA_TEST_DATABASE_URL|" "$f"
+    export ALULA_DATABASE_URL="$ALULA_TEST_DATABASE_URL"
+    sed -i "s|url: \"postgres://[^\"]*\"|url: \"$ALULA_TEST_DATABASE_URL\"|" "$work/alula.yaml"
   fi
 
   # `set -m` because checkpoints background a server and then `kill %1`, which

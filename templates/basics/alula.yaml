@@ -10,7 +10,7 @@ server:
 # concurrent database-touching requests, not a suggestion.
 datasource:
   primary:
-    url: "postgres://postgres:flight@127.0.0.1:55432/app_dev?sslmode=disable"
+    url: "postgres://postgres:alula@127.0.0.1:55432/app_dev?sslmode=disable"
     pool_size: 5
 
 actuator:

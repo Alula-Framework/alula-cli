@@ -35,7 +35,7 @@ import re, pathlib, sys
 
 tutorial = pathlib.Path("TUTORIAL.md").read_text()
 # Skip `.build`: a locally-built template vendors every dependency's source
-# there, so the haystack would include all of flight and flight-data and this
+# there, so the haystack would include all of alula and alula-data and this
 # check would pass on names no template mentions. CI checks out fresh and has
 # no `.build`, so leaving it in makes the check weaker here than in CI — the
 # worst direction for a check to differ.
@@ -127,7 +127,7 @@ echo "── removed APIs"
 #
 # A spelling the framework has deleted is a tutorial that will not compile,
 # whatever else passes. Add to this list whenever something is removed.
-removed_grep='TestContainer|container\.register\(|container\.resolve\(|container\.pipeline\(|container\.assets\(|container\.uploads\(|container\.registerChannel|flightRegisterAll|@Inject\("|@Component\(scope:|@Service\(scope:|@Repository\(scope:|@Component\(qualifier:|Lifetime\.'
+removed_grep='TestContainer|container\.register\(|container\.resolve\(|container\.pipeline\(|container\.assets\(|container\.uploads\(|container\.registerChannel|alulaRegisterAll|@Inject\("|@Component\(scope:|@Service\(scope:|@Repository\(scope:|@Component\(qualifier:|Lifetime\.'
 if hits=$(grep -nE "$removed_grep" TUTORIAL.md); then
   echo "  ✘ tutorial teaches APIs that no longer exist:"
   echo "$hits" | sed 's/^/      /'
@@ -144,7 +144,7 @@ echo "── dependency pins"
 python3 - <<'PYPINS'
 import re, pathlib, sys
 
-PIN = re.compile(r'Flight-Framework/([a-z-]+)\.git"[^)]*?from:\s*"([0-9][0-9.]*)"', re.S)
+PIN = re.compile(r'Alula-Framework/([a-z-]+)\.git"[^)]*?from:\s*"([0-9][0-9.]*)"', re.S)
 
 def pins(text):
     found = {}
@@ -157,7 +157,7 @@ template = {}
 for manifest in pathlib.Path("templates").rglob("Package.swift"):
     if ".build" in manifest.parts:
         # A locally-built template vendors its dependencies' own manifests
-        # here; reading them reports flight-data's pin of flight as if a
+        # here; reading them reports alula-data's pin of alula as if a
         # template had written it.
         continue
     for repo, versions in pins(manifest.read_text()).items():

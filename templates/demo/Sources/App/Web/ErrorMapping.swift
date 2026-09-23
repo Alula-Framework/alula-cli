@@ -1,6 +1,6 @@
-import FlightCore
-import FlightDataPostgres
-import FlightWeb
+import AlulaCore
+import AlulaDataPostgres
+import AlulaWeb
 
 /// One place where the error vocabularies this application *uses* but does
 /// not own become HTTP.
@@ -10,7 +10,7 @@ import FlightWeb
 /// application actually meets — `DataSourceError`, `HangarError`,
 /// `ChangesetValidationError` — with no HTTP shape, and they cannot be
 /// conformed here: they belong to other packages, and the packages below
-/// `FlightWeb` deliberately do not depend on it. A middleware cannot help
+/// `AlulaWeb` deliberately do not depend on it. A middleware cannot help
 /// either, because a handler's error is rendered by the router *inside* the
 /// chain — by the time middleware sees anything it is a finished 500.
 ///

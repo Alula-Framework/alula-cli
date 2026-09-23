@@ -1,5 +1,5 @@
-import FlightCore
-import FlightWeb
+import AlulaCore
+import AlulaWeb
 
 /// The one route this tier ships, so there is something to curl before you
 /// have written anything.
@@ -9,7 +9,7 @@ import FlightWeb
 @Controller
 struct HealthController {
 
-    /// Reads a key from `flight.yaml`. With no `default:`, the build plugin
+    /// Reads a key from `alula.yaml`. With no `default:`, the build plugin
     /// verifies the key exists — misspell it and the build fails, naming it.
     @ConfigValue("app.name") var appName: String
 

@@ -4,7 +4,7 @@ import Foundation
 struct New: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "new",
-        abstract: "Create a new Flight project.",
+        abstract: "Create a new Alula project.",
         discussion: """
             Templates are complete, working projects — each one builds and passes \
             its tests before it ships in this binary. The tier decides how much is \
@@ -98,9 +98,9 @@ struct New: AsyncParsableCommand {
         print("")
         print("  cd \(destination.lastPathComponent)")
         if tier != "skeleton" {
-            print("  docker run -d -e POSTGRES_PASSWORD=flight -e POSTGRES_DB=app_dev \\")
+            print("  docker run -d -e POSTGRES_PASSWORD=alula -e POSTGRES_DB=app_dev \\")
             print("             -p 55432:5432 postgres:16")
-            print("  FLIGHT_DATABASE_URL=postgres://postgres:flight@127.0.0.1:55432/app_dev \\")
+            print("  ALULA_DATABASE_URL=postgres://postgres:alula@127.0.0.1:55432/app_dev \\")
             print("             swift run migrate apply")
         }
         print("  swift run \(project.value)")

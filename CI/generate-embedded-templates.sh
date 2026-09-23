@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Regenerates Sources/flight/EmbeddedTemplates.swift from templates/.
+# Regenerates Sources/alula/EmbeddedTemplates.swift from templates/.
 #
 # The CLI ships the templates inside its binary: once installed, there is no
-# repository beside it to read from. Embedding them means `flight new` emits
+# repository beside it to read from. Embedding them means `alula new` emits
 # byte-for-byte what CI/verify-templates.sh builds and tests — the generator
 # and the thing it generates cannot disagree, because one is derived from the
 # other and CI checks the derivation is current.
@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-out="Sources/flight/EmbeddedTemplates.swift"
+out="Sources/alula/EmbeddedTemplates.swift"
 tmp="$(mktemp)"
 trap 'rm -f "$tmp" "$tmp.files"' EXIT
 
@@ -88,7 +88,7 @@ if [ "${1:-}" = "--check" ]; then
   if diff -q "$tmp" "$out" >/dev/null 2>&1; then
     echo "✔ embedded templates are current"
   else
-    echo "::error::Sources/flight/EmbeddedTemplates.swift is stale."
+    echo "::error::Sources/alula/EmbeddedTemplates.swift is stale."
     echo "::error::Run ./CI/generate-embedded-templates.sh and commit the result."
     diff "$out" "$tmp" | head -20 || true
     exit 1

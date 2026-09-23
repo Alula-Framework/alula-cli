@@ -1,6 +1,6 @@
-import FlightCore
-import FlightSecurityCore
-import FlightWeb
+import AlulaCore
+import AlulaSecurityCore
+import AlulaWeb
 
 /// Signing in with a cookie instead of a header — written against
 /// `SignInProvider`, so it does not know who checks the password.
@@ -10,9 +10,9 @@ import FlightWeb
 /// does. A browser does not: it signs in once and expects a cookie to
 /// remember the answer. This controller is that once.
 ///
-/// Today the provider is `FlightPasswordSignInModule`'s, over the accounts
+/// Today the provider is `AlulaPasswordSignInModule`'s, over the accounts
 /// `DemoAccountsModule` holds. Swapping that one line in `Main.swift` for
-/// `FlightOIDCSignInModule.self`, plus a `security.oidc` block, moves this
+/// `AlulaOIDCSignInModule.self`, plus a `security.oidc` block, moves this
 /// demo onto Keycloak or any OpenID Connect provider — and nothing below
 /// changes. `begin` answers with a form today and a redirect then; the
 /// callback route is already here for it.
@@ -39,8 +39,8 @@ import FlightWeb
 @Controller("/session")
 struct SessionController {
     /// Whichever sign-in module is listed provides it.
-    // flight:hand-registered — a value FlightPasswordSignInModule (or
-    // FlightOIDCSignInModule) holds, not a scanned component.
+    // alula:hand-registered — a value AlulaPasswordSignInModule (or
+    // AlulaOIDCSignInModule) holds, not a scanned component.
     @Inject var provider: any SignInProvider
 
     /// What `GET /csrf` answers: the token a browser sends back on

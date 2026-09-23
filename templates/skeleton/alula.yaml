@@ -1,4 +1,4 @@
-# Layer 3 of Flight Config: the file. Environment variables (FLIGHT_*) layer
+# Layer 3 of Alula Config: the file. Environment variables (ALULA_*) layer
 # over it, and both are frozen into an immutable `Configuration` at bootstrap —
 # nothing re-reads this file at runtime.
 app:
@@ -8,7 +8,7 @@ server:
   host: 127.0.0.1
   port: 8080
 
-# Health, info, and metrics. Not registered at all when FLIGHT_ENV is prod:
+# Health, info, and metrics. Not registered at all when ALULA_ENV is prod:
 # the routes do not exist rather than existing-but-guarded.
 actuator:
   format: json

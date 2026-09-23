@@ -1,5 +1,5 @@
-import FlightCore
-import FlightWeb
+import AlulaCore
+import AlulaWeb
 
 /// Logs the method and path of every request as it arrives.
 @Middleware

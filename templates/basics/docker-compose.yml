@@ -3,7 +3,7 @@
 #     docker compose up -d
 #
 # The credentials, port and database name below match `datasource.primary.url`
-# in flight.yaml exactly, so `swift run` works immediately after this comes up
+# in alula.yaml exactly, so `swift run` works immediately after this comes up
 # with nothing else to configure.
 #
 # Port 55432, not 5432, deliberately: a Postgres already installed on the host
@@ -15,7 +15,7 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_PASSWORD: flight
+      POSTGRES_PASSWORD: alula
       POSTGRES_DB: app_dev
     ports:
       - '127.0.0.1:55432:5432'
@@ -46,7 +46,7 @@ volumes:
 #
 # then point the tests at it, e.g.
 #
-#     export DATABASE_URL="postgres://postgres:flight@127.0.0.1:55432/app_test?sslmode=disable"
+#     export DATABASE_URL="postgres://postgres:alula@127.0.0.1:55432/app_test?sslmode=disable"
 #
 # The tests this project ships need no database at all — they construct
 # controllers with mocked repositories and assert on what the method returns.

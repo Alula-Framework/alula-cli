@@ -1,8 +1,8 @@
-import FlightChannels
-import FlightChannelsProtocol
-import FlightCore
-import FlightPresence
-import FlightWeb
+import AlulaChannels
+import AlulaChannelsProtocol
+import AlulaCore
+import AlulaPresence
+import AlulaWeb
 import Foundation
 
 /// The live half of the chat room: `ChatController` is its history, this is

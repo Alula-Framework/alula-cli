@@ -1,5 +1,5 @@
-import FlightCore
-import FlightScheduler
+import AlulaCore
+import AlulaScheduler
 import Foundation
 
 /// Scheduled work, as methods.
@@ -23,7 +23,7 @@ struct ChatJobs {
     /// without thinking about it.
     ///
     /// Running once across several servers needs a `JobCoordinator` —
-    /// `FlightSchedulerPostgres` provides one. Without it the scheduler warns
+    /// `AlulaSchedulerPostgres` provides one. Without it the scheduler warns
     /// at startup rather than silently running this on every server, which is
     /// the kind of failure you would otherwise discover from the data.
     @Scheduled("0 0 3 * * *", timeZone: "UTC")
@@ -41,7 +41,7 @@ struct ChatJobs {
     /// leaves every other server cold. This is work that is per-process by
     /// nature, and saying so is the whole distinction.
     ///
-    /// Swap `FlightCacheModule` for the Valkey-backed one and this becomes
+    /// Swap `AlulaCacheModule` for the Valkey-backed one and this becomes
     /// the wrong annotation — a shared cache only needs warming once. Where
     /// the state lives is what decides which of the two a job is.
     @Scheduled(every: .minutes(1), initialDelay: .seconds(5), onEveryNode: true)
