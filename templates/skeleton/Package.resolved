@@ -1,6 +1,15 @@
 {
-  "originHash" : "d3c0aa90b611541d7831d2e9b620dd7d40580ff5c089ebe099771f54a31d19ed",
+  "originHash" : "c3e6b05d1f6b87d90841f3a4466d82850e5d0b684d565281a38a2a5f5973b214",
   "pins" : [
+    {
+      "identity" : "alula",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Alula-Framework/alula.git",
+      "state" : {
+        "revision" : "2cd8de243357e66f5087be1d8f065a54359b9e59",
+        "version" : "0.36.0"
+      }
+    },
     {
       "identity" : "async-http-client",
       "kind" : "remoteSourceControl",
@@ -17,15 +26,6 @@
       "state" : {
         "revision" : "e1caa19077dda4b00441142ef57da3db02acd466",
         "version" : "1.4.2"
-      }
-    },
-    {
-      "identity" : "alula",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Alula-Framework/alula.git",
-      "state" : {
-        "revision" : "5ae30ae99672684fa843d40f0a2a2b614d3e019c",
-        "version" : "0.18.0"
       }
     },
     {
@@ -251,6 +251,15 @@
       "state" : {
         "revision" : "869129b7bf4ecc57b97d0193ad29690ca2134750",
         "version" : "1.8.1"
+      }
+    },
+    {
+      "identity" : "swift-telemetry",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Alula-Framework/swift-telemetry.git",
+      "state" : {
+        "revision" : "f9877623309b7f9edff121db3ccc54ceca0a1b7c",
+        "version" : "0.1.0"
       }
     },
     {

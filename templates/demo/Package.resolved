@@ -1,6 +1,24 @@
 {
-  "originHash" : "bb794baaf7328b8d679453d3ce845d37b212620a0bad1c4036d6afc0ba802a23",
+  "originHash" : "416168cfd2b89e53a9279bd829c55e2fb1e1a34106aecc586bba796ce759849a",
   "pins" : [
+    {
+      "identity" : "alula",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Alula-Framework/alula.git",
+      "state" : {
+        "revision" : "2cd8de243357e66f5087be1d8f065a54359b9e59",
+        "version" : "0.36.0"
+      }
+    },
+    {
+      "identity" : "alula-data",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Alula-Framework/alula-data.git",
+      "state" : {
+        "revision" : "010fddf3c87a1cb4124fb2fe6c78164e10b45c84",
+        "version" : "0.11.0"
+      }
+    },
     {
       "identity" : "async-http-client",
       "kind" : "remoteSourceControl",
@@ -20,30 +38,12 @@
       }
     },
     {
-      "identity" : "alula",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Alula-Framework/alula.git",
-      "state" : {
-        "revision" : "46ac987c55b40482d496784fca9ad6503967cf2f",
-        "version" : "0.35.0"
-      }
-    },
-    {
-      "identity" : "alula-data",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Alula-Framework/alula-data.git",
-      "state" : {
-        "revision" : "58703aaf38ca79c53881ce0155b00a4100539b72",
-        "version" : "0.9.0"
-      }
-    },
-    {
       "identity" : "hangar",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Alula-Framework/hangar.git",
       "state" : {
-        "revision" : "2298d624b1aea343092e9c263b57a9e4f560108b",
-        "version" : "0.9.1"
+        "revision" : "f130ea7159ec6ab281558b8d535f23e9f0daf8e6",
+        "version" : "0.9.2"
       }
     },
     {

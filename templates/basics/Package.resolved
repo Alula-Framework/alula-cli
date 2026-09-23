@@ -1,6 +1,24 @@
 {
-  "originHash" : "865e267abed47b8c79596aba0fe3ce6731792cb7190e9cbc82d5d3dfba6e827a",
+  "originHash" : "3d7c2a6e5e9dee3e4dc6d21358e4ca8c617f7ad10d43dff296c832b345ee627e",
   "pins" : [
+    {
+      "identity" : "alula",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Alula-Framework/alula.git",
+      "state" : {
+        "revision" : "2cd8de243357e66f5087be1d8f065a54359b9e59",
+        "version" : "0.36.0"
+      }
+    },
+    {
+      "identity" : "alula-data",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Alula-Framework/alula-data.git",
+      "state" : {
+        "revision" : "010fddf3c87a1cb4124fb2fe6c78164e10b45c84",
+        "version" : "0.11.0"
+      }
+    },
     {
       "identity" : "async-http-client",
       "kind" : "remoteSourceControl",
@@ -20,30 +38,12 @@
       }
     },
     {
-      "identity" : "alula",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Alula-Framework/alula.git",
-      "state" : {
-        "revision" : "4bff63ea8515021a4f40712a50fe7e9f3ba8a55e",
-        "version" : "0.17.0"
-      }
-    },
-    {
-      "identity" : "alula-data",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Alula-Framework/alula-data.git",
-      "state" : {
-        "revision" : "04b80fb6a97badbd4362877a5857b832b86f5076",
-        "version" : "0.6.0"
-      }
-    },
-    {
       "identity" : "hangar",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Alula-Framework/hangar.git",
       "state" : {
-        "revision" : "3b8df246f8e755c8efa29196a43ddb114bf17f0a",
-        "version" : "0.5.1"
+        "revision" : "f130ea7159ec6ab281558b8d535f23e9f0daf8e6",
+        "version" : "0.9.2"
       }
     },
     {
@@ -296,6 +296,15 @@
       "state" : {
         "revision" : "869129b7bf4ecc57b97d0193ad29690ca2134750",
         "version" : "1.8.1"
+      }
+    },
+    {
+      "identity" : "swift-telemetry",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Alula-Framework/swift-telemetry.git",
+      "state" : {
+        "revision" : "f9877623309b7f9edff121db3ccc54ceca0a1b7c",
+        "version" : "0.1.0"
       }
     },
     {
