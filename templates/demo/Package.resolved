@@ -1,5 +1,5 @@
 {
-  "originHash" : "4725f328e7927c4f99ea6897fff4319b07249ef5bb79eb2de685d57b5c2d31ab",
+  "originHash" : "bb794baaf7328b8d679453d3ce845d37b212620a0bad1c4036d6afc0ba802a23",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Flight-Framework/flight.git",
       "state" : {
-        "revision" : "53679203cc2213d4885ce0961e59b197000ec0f1",
-        "version" : "0.34.0"
+        "revision" : "46ac987c55b40482d496784fca9ad6503967cf2f",
+        "version" : "0.35.0"
       }
     },
     {
@@ -305,6 +305,15 @@
       "state" : {
         "revision" : "869129b7bf4ecc57b97d0193ad29690ca2134750",
         "version" : "1.8.1"
+      }
+    },
+    {
+      "identity" : "swift-telemetry",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Flight-Framework/swift-telemetry.git",
+      "state" : {
+        "revision" : "f9877623309b7f9edff121db3ccc54ceca0a1b7c",
+        "version" : "0.1.0"
       }
     },
     {
