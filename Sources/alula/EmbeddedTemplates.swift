@@ -26,8 +26,8 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.43.0", traits: ["Web"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.14.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.44.0", traits: ["Web"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.15.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -731,8 +731,8 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.43.0", traits: ["Security"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.14.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.44.0", traits: ["Security"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.15.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -4750,6 +4750,35 @@ sessions:
   cookie-secure: false
 
 """#,
+            "alula-prod.yaml": #"""
+# Loaded on top of alula.yaml when ALULA_ENV=prod. What a production
+# deployment wants that development does not.
+
+# One JSON object per line, for a log pipeline to index. Override the level
+# per deployment with ALULA_LOGGING_LEVEL.
+logging:
+  format: json
+  level: info
+
+# On SIGTERM: stop reporting ready, keep serving while the orchestrator stops
+# routing here, then shut down within the pod's grace period.
+lifecycle:
+  drain-seconds: 5
+  shutdown-timeout-seconds: 25
+
+# No request holds a connection open for more than 30 seconds unless its route
+# names a longer timeout.
+web:
+  request-timeout-seconds: 30
+
+# Also needed in production, and deliberately not defaulted here:
+# - ALULA_DATASOURCE_PRIMARY_URL, the real database.
+# - A mail transport. AlulaMailModule refuses to start without one outside
+#   development: add AlulaMailSMTPModule (the "SMTP" trait) and mail.smtp.*.
+# - web.websocket.allowed-origins, if the browser client is served from
+#   another origin.
+
+"""#,
             "alula.yaml": #"""
 app:
   name: App
@@ -4896,7 +4925,7 @@ let package = Package(
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // core: configuration, composition, and the service lifecycle.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.43.0", traits: ["Web"])
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.44.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
