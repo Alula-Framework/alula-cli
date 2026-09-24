@@ -80,7 +80,9 @@ for tier in sorted(p.name for p in root.iterdir() if p.is_dir()):
         lines.append(f'            "{rel}": {swift_literal(text)},')
     lines.append("        ],")
 
-lines += ["    ]", "", "    static var tiers: [String] { files.keys.sorted() }", "}", ""]
+lines += ["    ]", "", "    /// What `alula new --tier` offers. A directory starting with `_` is",
+    "    /// written by a generator into an existing project, never a project of its own.",
+    "    static var tiers: [String] { files.keys.filter { !$0.hasPrefix(\"_\") }.sorted() }", "}", ""]
 out.write_text("\n".join(lines))
 PY
 

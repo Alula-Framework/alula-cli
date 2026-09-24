@@ -5,7 +5,7 @@ struct Generate: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "generate",
         abstract: "Write new source files in this project's conventions.",
-        subcommands: [GenerateController.self]
+        subcommands: [GenerateController.self, GenerateAuth.self]
     )
 }
 
@@ -26,11 +26,12 @@ struct GenerateController: ParsableCommand {
     @Argument(help: "The controller's name, without the Controller suffix.")
     var name: String
 
-    @Option(help: "The executable target the controller belongs to.")
-    var target = "App"
+    @Option(help: "The executable target the controller belongs to. Found when there is one.")
+    var target: String?
 
     func run() throws {
         let project = try Project.locate()
+        let target = try project.appTarget(target)
         let names = try ControllerNames(name)
         let source = project.root.appendingPathComponent(
             "Sources/\(target)/Controllers/\(names.type).swift")
@@ -44,6 +45,102 @@ struct GenerateController: ParsableCommand {
         print("created \(source.path.replacingOccurrences(of: project.root.path + "/", with: ""))")
         print("created \(test.path.replacingOccurrences(of: project.root.path + "/", with: ""))")
         print("routes: GET \(names.path), GET \(names.path)/:id")
+    }
+
+    private func write(_ contents: String, to file: URL) throws {
+        do {
+            try FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try contents.write(to: file, atomically: true, encoding: .utf8)
+        } catch {
+            throw CLIError.writeFailed(file.path, underlying: error)
+        }
+    }
+}
+
+struct GenerateAuth: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "auth",
+        abstract: "Accounts in Postgres: registration, email verification, password reset.",
+        discussion: """
+              alula generate auth
+                Sources/<App>/Accounts/          Account, AccountFlows, AccountController, AccountsModule
+                Sources/Migrations/<ts>_CreateAccounts.swift
+                Tests/<App>Tests/AccountFlowsTests.swift
+
+            The code is written into the project, not linked: it is yours to change. \
+            It builds on AlulaPasswordSignInModule, so the package needs the Security \
+            trait and the products it names when it cannot find them. Nothing is overwritten.
+            """
+    )
+
+    @Option(help: "The executable target the accounts belong to. Found when there is one.")
+    var target: String?
+
+    /// What the written code imports, and so what the manifest must name.
+    static let requiredProducts = [
+        "AlulaSecurityCore", "AlulaRateLimit", "AlulaMail", "AlulaQueue", "AlulaDataPostgres",
+        "AlulaMigrate",
+    ]
+    static let requiredTestProducts = ["AlulaMailTesting", "AlulaQueueTesting"]
+
+    func run() throws {
+        let project = try Project.locate()
+        let manifest = project.manifest
+        let missing = (Self.requiredProducts + Self.requiredTestProducts).filter {
+            !manifest.contains("\"\($0)\"")
+        }
+        guard missing.isEmpty else { throw CLIError.missingProducts(missing) }
+        guard project.hasMigrateExecutable else {
+            throw CLIError.noMigrateExecutable(project.root.path)
+        }
+        let target = try project.appTarget(target)
+        guard let template = EmbeddedTemplates.files["_auth"] else {
+            throw CLIError.unknownTier("_auth", available: EmbeddedTemplates.tiers)
+        }
+
+        let stamp = Self.timestamp(Date())
+        let files = template.map { path, contents -> (URL, String) in
+            let path =
+                path
+                .replacingOccurrences(of: "__TIMESTAMP__", with: stamp)
+                .replacingOccurrences(of: "Sources/App/", with: "Sources/\(target)/")
+                .replacingOccurrences(of: "Tests/AppTests/", with: "Tests/\(target)Tests/")
+            let contents = contents.replacingOccurrences(
+                of: "@testable import App\n", with: "@testable import \(target)\n")
+            return (project.root.appendingPathComponent(path), contents)
+        }.sorted { $0.0.path < $1.0.path }
+
+        for (file, _) in files where FileManager.default.fileExists(atPath: file.path) {
+            throw CLIError.fileExists(file.path)
+        }
+        for (file, contents) in files {
+            try write(contents, to: file)
+            print(
+                "created \(file.path.replacingOccurrences(of: project.root.path + "/", with: ""))")
+        }
+        print(
+            """
+
+            Next:
+              1. List the module in Main.swift, beside the password sign-in it feeds:
+                     AlulaPasswordSignInModule.self,
+                     AccountsModule.self,
+                 and remove whatever provided `credentialStore` before.
+              2. Point the emailed links at your front end, in alula.yaml:
+                     auth:
+                       link-base-url: https://app.example.com
+              3. alula migrate
+            """)
+    }
+
+    /// `20260924153000`: UTC, what `alula migrate create` writes.
+    static func timestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyyMMddHHmmss"
+        return formatter.string(from: date)
     }
 
     private func write(_ contents: String, to file: URL) throws {

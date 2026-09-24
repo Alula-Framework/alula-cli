@@ -1,13 +1,13 @@
 {
-  "originHash" : "416168cfd2b89e53a9279bd829c55e2fb1e1a34106aecc586bba796ce759849a",
+  "originHash" : "02f604b7165fd81dfadb7e084279afd9bce5c5181a52492d7abcec7e53d271c2",
   "pins" : [
     {
       "identity" : "alula",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Alula-Framework/alula.git",
       "state" : {
-        "revision" : "2cd8de243357e66f5087be1d8f065a54359b9e59",
-        "version" : "0.36.0"
+        "revision" : "67dd9212350221f35407f1972e7a15c2cb4ec5cc",
+        "version" : "0.45.0"
       }
     },
     {
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Alula-Framework/alula-data.git",
       "state" : {
-        "revision" : "010fddf3c87a1cb4124fb2fe6c78164e10b45c84",
-        "version" : "0.11.0"
+        "revision" : "47bd6ee8630f638c01eb78abf3b422a80aa76958",
+        "version" : "0.15.0"
       }
     },
     {
@@ -114,8 +114,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-async-algorithms.git",
       "state" : {
-        "revision" : "3da39bbc4e687d4192af7c9cf4eab805745a0b9c",
-        "version" : "1.1.5"
+        "revision" : "789dcf1f3d3f00251482f40a432ab7144c181987",
+        "version" : "1.1.6"
       }
     },
     {
@@ -132,8 +132,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-certificates.git",
       "state" : {
-        "revision" : "c8aece90ea05f9866bd392a5bf13b5cae56c0e03",
-        "version" : "1.20.0"
+        "revision" : "ff86b924ead66f853b8baf91f3c41926a8f36177",
+        "version" : "1.21.0"
       }
     },
     {
@@ -150,8 +150,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-collections.git",
       "state" : {
-        "revision" : "a0cb0954ecb21e4e31b0070e6ed5674e8556685a",
-        "version" : "1.6.0"
+        "revision" : "a66de878e87ef5a3d5d390e0f6d9002aa5541a43",
+        "version" : "1.7.0"
       }
     },
     {

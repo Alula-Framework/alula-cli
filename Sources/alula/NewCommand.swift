@@ -43,7 +43,8 @@ struct New: AsyncParsableCommand {
     func run() async throws {
         let project = try ProjectName(name)
 
-        guard let template = EmbeddedTemplates.files[tier] else {
+        guard EmbeddedTemplates.tiers.contains(tier), let template = EmbeddedTemplates.files[tier]
+        else {
             throw CLIError.unknownTier(tier, available: EmbeddedTemplates.tiers)
         }
 

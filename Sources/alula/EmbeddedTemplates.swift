@@ -7,6 +7,717 @@
 enum EmbeddedTemplates {
     /// tier -> (relative path -> file contents)
     static let files: [String: [String: String]] = [
+        "_auth": [
+            "Sources/App/Accounts/Account.swift": #"""
+import AlulaDataPostgres
+import AlulaSecurityCore
+import AlulaWeb
+import Foundation
+
+/// One person who can sign in. Written by `alula generate auth`; it is yours
+/// now — add columns in a migration and properties here.
+@Entity("accounts")
+struct Account: Sendable, Equatable {
+    @ID var id: UUID
+    /// Always lowercased.
+    var email: String
+    var name: String
+    /// An Argon2id hash, or nil for an account with no password yet.
+    @Column("password_hash") var passwordHash: String?
+    @Column("email_verified") var emailVerified: Bool
+    var disabled: Bool
+    var roles: [String]
+    @Column("created_at") var createdAt: Date
+    @Column("updated_at") var updatedAt: Date
+
+    /// What password sign-in needs to see.
+    var credential: StoredCredential {
+        StoredCredential(
+            subject: id.uuidString.lowercased(), passwordHash: passwordHash,
+            roles: Set(roles), isDisabled: disabled, email: email,
+            emailVerified: emailVerified, name: name)
+    }
+}
+
+/// The account operations the auth flows need. Postgres in the app
+/// (`PostgresAccounts`), memory in tests.
+protocol AccountDirectory: CredentialStore {
+    func account(email: String) async throws -> Account?
+    func account(id: UUID) async throws -> Account?
+    /// Throws ``AccountExists`` when the address is taken.
+    func create(email: String, name: String, passwordHash: String) async throws -> Account
+    func markEmailVerified(id: UUID) async throws
+    func setPasswordHash(_ hash: String, id: UUID) async throws
+}
+
+struct AccountExists: Error {}
+
+/// Accounts in the `accounts` table.
+struct PostgresAccounts: AccountDirectory {
+    let pool: PostgresDataSource
+
+    func account(email: String) async throws -> Account? {
+        let email = email.lowercased()
+        return try await pool.withRepo { repo in
+            try await repo.one(Account.where { $0.email == email })
+        }
+    }
+
+    func account(id: UUID) async throws -> Account? {
+        try await pool.withRepo { repo in
+            try await repo.one(Account.where { $0.id == id })
+        }
+    }
+
+    func create(email: String, name: String, passwordHash: String) async throws -> Account {
+        let now = Date()
+        let account = Account(
+            id: UUID(), email: email.lowercased(), name: name, passwordHash: passwordHash,
+            emailVerified: false, disabled: false, roles: [], createdAt: now, updatedAt: now)
+        do {
+            return try await pool.withRepo { repo in try await repo.insert(account) }
+        } catch {
+            if try await self.account(email: email) != nil { throw AccountExists() }
+            throw error
+        }
+    }
+
+    func markEmailVerified(id: UUID) async throws {
+        try await pool.withRepo { repo in
+            try await repo.execute(
+                "UPDATE accounts SET email_verified = true, updated_at = now() WHERE id = \(id)")
+        }
+    }
+
+    func setPasswordHash(_ hash: String, id: UUID) async throws {
+        try await pool.withRepo { repo in
+            try await repo.execute(
+                "UPDATE accounts SET password_hash = \(hash), updated_at = now() WHERE id = \(id)")
+        }
+    }
+
+    // MARK: CredentialStore
+
+    func credential(forIdentifier identifier: String) async throws -> StoredCredential? {
+        try await account(email: identifier)?.credential
+    }
+
+    func updatePasswordHash(_ hash: String, forSubject subject: String) async throws {
+        guard let id = UUID(uuidString: subject) else { return }
+        try await setPasswordHash(hash, id: id)
+    }
+}
+
+/// One-time tokens in the `account_tokens` table: durable, and shared by
+/// every replica, which the in-memory store is not.
+struct PostgresAccountTokens: OneTimeTokenStore {
+    let pool: PostgresDataSource
+
+    func put(_ key: String, _ record: Data, ttl: Duration) async throws {
+        let expires = Date().addingTimeInterval(Double(ttl.components.seconds))
+        try await pool.withRepo { repo in
+            try await repo.execute(
+                """
+                INSERT INTO account_tokens (key, record, expires_at) VALUES (\(key), \(record), \(expires))
+                ON CONFLICT (key) DO UPDATE SET record = EXCLUDED.record, expires_at = EXCLUDED.expires_at
+                """)
+            // Expired rows are removed as new ones arrive; no job needed.
+            try await repo.execute("DELETE FROM account_tokens WHERE expires_at < now()")
+        }
+    }
+
+    /// Delete-and-return in one statement: one redemption per token, however
+    /// many requests race with the same link.
+    func take(_ key: String) async throws -> Data? {
+        try await pool.withRepo { repo in
+            let rows = try await repo.execute(
+                "DELETE FROM account_tokens WHERE key = \(key) AND expires_at > now() RETURNING record")
+            for try await record in rows.decode(Data.self) { return record }
+            return nil
+        }
+    }
+}
+
+"""#,
+            "Sources/App/Accounts/AccountController.swift": #"""
+import AlulaCore
+import AlulaSecurityCore
+import AlulaWeb
+
+/// The account routes. Written by `alula generate auth`.
+///
+/// Signing in and out stay where they are — the sign-in provider's routes.
+/// These are everything around them:
+///
+///     GET  /account/csrf              the token the POSTs below carry on X-CSRF-Token
+///     POST /account/register          {name, email, password}   → 202, whatever happened
+///     POST /account/verify-email      {token}                   → 204
+///     POST /account/forgot-password   {email}                   → 202, whatever happened
+///     POST /account/reset-password    {token, password}         → 204
+///     POST /account/password          {current, new}            → 204, signed in
+///
+/// The links in the emails point at your front end
+/// (`auth.link-base-url` + `/verify-email?token=…`), which posts the token
+/// here. See `AccountFlows` for what each flow takes care of.
+@Controller("/account")
+struct AccountController {
+    @Inject var flows: AccountFlows
+
+    struct CSRFToken: Codable, ResponseEncodable {
+        let csrfToken: String
+    }
+
+    struct Register: Decodable, Validatable {
+        let name: String
+        let email: String
+        let password: String
+
+        func validate(_ v: inout Validation) {
+            v.check("name", name, .notBlank, .length(max: 120))
+            v.check("email", email, .email, .length(max: 254))
+            v.check("password", password, .length(min: 12, max: 256))
+        }
+    }
+
+    struct TokenBody: Decodable, Validatable {
+        let token: String
+        func validate(_ v: inout Validation) { v.check("token", token, .notBlank) }
+    }
+
+    struct ForgotPassword: Decodable, Validatable {
+        let email: String
+        func validate(_ v: inout Validation) { v.check("email", email, .email) }
+    }
+
+    struct ResetPassword: Decodable, Validatable {
+        let token: String
+        let password: String
+
+        func validate(_ v: inout Validation) {
+            v.check("token", token, .notBlank)
+            v.check("password", password, .length(min: 12, max: 256))
+        }
+    }
+
+    struct ChangePassword: Decodable, Validatable {
+        let current: String
+        let new: String
+
+        func validate(_ v: inout Validation) {
+            v.check("new", new, .length(min: 12, max: 256))
+        }
+    }
+
+    @GetRoute("/csrf")
+    func csrf(_ context: RequestContext) throws -> CSRFToken {
+        CSRFToken(csrfToken: try context.requireSession().csrfToken())
+    }
+
+    @PostRoute("/register", pipelines: [.default, "accounts"])
+    func register(_ context: RequestContext, body: Register) async throws -> Response {
+        try await flows.register(
+            name: body.name, email: body.email, password: body.password,
+            clientAddress: context.clientAddress?.host)
+        return .status(.accepted)
+    }
+
+    @PostRoute("/verify-email", pipelines: [.default, "accounts"])
+    func verifyEmail(_ context: RequestContext, body: TokenBody) async throws -> Response {
+        try await flows.verifyEmail(token: body.token)
+        return .noContent
+    }
+
+    @PostRoute("/forgot-password", pipelines: [.default, "accounts"])
+    func forgotPassword(_ context: RequestContext, body: ForgotPassword) async throws -> Response {
+        try await flows.requestPasswordReset(
+            email: body.email, clientAddress: context.clientAddress?.host)
+        return .status(.accepted)
+    }
+
+    @PostRoute("/reset-password", pipelines: [.default, "accounts"])
+    func resetPassword(_ context: RequestContext, body: ResetPassword) async throws -> Response {
+        try await flows.resetPassword(token: body.token, newPassword: body.password)
+        return .noContent
+    }
+
+    /// Keeps this browser signed in and ends every other session.
+    @PostRoute("/password", pipelines: [.authenticated, "accounts"])
+    func changePassword(_ context: RequestContext, body: ChangePassword) async throws -> Response {
+        try await flows.changePassword(
+            principal: try context.requirePrincipal(), current: body.current, new: body.new,
+            keeping: try context.requireSession().id, clientAddress: context.clientAddress?.host)
+        return .noContent
+    }
+}
+
+"""#,
+            "Sources/App/Accounts/AccountFlows.swift": #"""
+import AlulaCore
+import AlulaMail
+import AlulaQueue
+import AlulaRateLimit
+import AlulaSecurityCore
+import AlulaWeb
+import Foundation
+
+/// `auth.*`, read by `AccountsModule`.
+struct AuthSettings: Sendable {
+    /// Where the links in emails point: your front end's pages, which read
+    /// the `token` and post it back.
+    var linkBase: String
+    var appName: String
+}
+
+/// Registration, email verification, password reset and password change.
+/// Written by `alula generate auth`; yours to change.
+///
+/// What it takes care not to leak, and why:
+/// - Registering and asking for a reset answer the same way whether or not
+///   the address has an account, so neither can be used to find out who
+///   does. A taken address gets an email saying so instead.
+/// - A reset token is bound to the password hash it was issued against. The
+///   first reset changes the hash, and every other outstanding token dies
+///   with it.
+/// - Resetting or changing a password ends the account's other sessions.
+/// - The endpoints that send email are throttled per address and per client,
+///   so they cannot be used to flood someone's inbox.
+@Service
+struct AccountFlows {
+    @Inject var accounts: any AccountDirectory
+    @Inject var tokens: OneTimeTokens
+    @Inject var authenticator: PasswordAuthenticator
+    @Inject var mailer: Mailer
+    @Inject var jobs: JobQueue
+    @Inject var sessions: SessionRuntime
+    @Inject var limiter: RateLimiter
+    @Inject var settings: AuthSettings
+
+    func register(name: String, email: String, password: String, clientAddress: String?)
+        async throws
+    {
+        let email = email.lowercased()
+        try await throttle("register", email: email, clientAddress: clientAddress)
+        let hash = try authenticator.hashNewPassword(password)
+        do {
+            let account = try await accounts.create(email: email, name: name, passwordHash: hash)
+            try await sendVerification(to: account)
+        } catch is AccountExists {
+            try await mailer.sendLater(AuthMail.alreadyRegistered(email, settings: settings), via: jobs)
+        }
+    }
+
+    func verifyEmail(token: String) async throws {
+        let subject = try await tokens.redeem(token, purpose: .emailVerification) { subject in
+            try await self.account(subject)?.email
+        }
+        guard let id = UUID(uuidString: subject) else { throw OneTimeTokenError.invalidOrExpired }
+        try await accounts.markEmailVerified(id: id)
+    }
+
+    func requestPasswordReset(email: String, clientAddress: String?) async throws {
+        let email = email.lowercased()
+        try await throttle("reset", email: email, clientAddress: clientAddress)
+        guard let account = try await accounts.account(email: email), !account.disabled else { return }
+        let token = try await tokens.issue(
+            for: account.credential.subject, purpose: .passwordReset, lifetime: .seconds(3600),
+            binding: account.passwordHash ?? "")
+        try await mailer.sendLater(
+            AuthMail.resetPassword(account, token: token, settings: settings), via: jobs)
+    }
+
+    func resetPassword(token: String, newPassword: String) async throws {
+        let subject = try await tokens.redeem(token, purpose: .passwordReset) { subject in
+            try await self.account(subject).map { $0.passwordHash ?? "" }
+        }
+        guard let id = UUID(uuidString: subject) else { throw OneTimeTokenError.invalidOrExpired }
+        try await accounts.setPasswordHash(try authenticator.hashNewPassword(newPassword), id: id)
+        _ = try? await sessions.revokeSessions(ownedBy: subject)
+    }
+
+    /// Checks the current password the way sign-in does, throttling included.
+    func changePassword(
+        principal: Principal, current: String, new: String, keeping session: SessionID?,
+        clientAddress: String?
+    ) async throws {
+        guard let email = principal.email else { throw PasswordAuthenticationError.invalidCredentials }
+        _ = try await authenticator.authenticate(
+            identifier: email, password: current, clientAddress: clientAddress)
+        guard let id = UUID(uuidString: principal.subject) else {
+            throw PasswordAuthenticationError.invalidCredentials
+        }
+        try await accounts.setPasswordHash(try authenticator.hashNewPassword(new), id: id)
+        _ = try? await sessions.revokeSessions(ownedBy: principal.subject, keeping: session)
+    }
+
+    func sendVerification(to account: Account) async throws {
+        let token = try await tokens.issue(
+            for: account.credential.subject, purpose: .emailVerification, lifetime: .seconds(48 * 3600),
+            binding: account.email)
+        try await mailer.sendLater(
+            AuthMail.verifyEmail(account, token: token, settings: settings), via: jobs)
+    }
+
+    private func account(_ subject: String) async throws -> Account? {
+        guard let id = UUID(uuidString: subject) else { return nil }
+        return try await accounts.account(id: id)
+    }
+
+    private func throttle(_ action: String, email: String, clientAddress: String?) async throws {
+        let perAddress = try await limiter.consume("auth:\(action):\(email)", quota: .perHour(5))
+        var allowed = perAddress.isAllowed
+        if let clientAddress {
+            allowed =
+                try await limiter.consume("auth:\(action):ip:\(clientAddress)", quota: .perHour(30))
+                .isAllowed && allowed
+        }
+        guard allowed else { throw HTTPError(.tooManyRequests, "Too many requests; try again later") }
+    }
+}
+
+/// The emails the flows send. Plain text; add `html:` when you have a design.
+enum AuthMail {
+    static func verifyEmail(_ account: Account, token: String, settings: AuthSettings) throws
+        -> MailMessage
+    {
+        MailMessage(
+            to: [try MailAddress(account.email, name: account.name)],
+            subject: "Confirm your email for \(settings.appName)",
+            text: """
+                Hello \(account.name),
+
+                Confirm this address by opening:
+                \(settings.linkBase)/verify-email?token=\(token)
+
+                The link works for 48 hours. If you did not sign up, ignore this email.
+                """)
+    }
+
+    static func resetPassword(_ account: Account, token: String, settings: AuthSettings) throws
+        -> MailMessage
+    {
+        MailMessage(
+            to: [try MailAddress(account.email, name: account.name)],
+            subject: "Reset your \(settings.appName) password",
+            text: """
+                Hello \(account.name),
+
+                Choose a new password here:
+                \(settings.linkBase)/reset-password?token=\(token)
+
+                The link works for one hour, once. If you did not ask for this, \
+                ignore this email; your password has not changed.
+                """)
+    }
+
+    static func alreadyRegistered(_ email: String, settings: AuthSettings) throws -> MailMessage {
+        MailMessage(
+            to: [try MailAddress(email)],
+            subject: "You already have an account with \(settings.appName)",
+            text: """
+                Someone tried to register with this address, which already has an account.
+
+                If it was you, sign in, or reset your password:
+                \(settings.linkBase)/forgot-password
+
+                If it was not, you can ignore this email.
+                """)
+    }
+}
+
+"""#,
+            "Sources/App/Accounts/AccountsModule.swift": #"""
+import AlulaCore
+import AlulaDataPostgres
+import AlulaSecurityCore
+import AlulaWeb
+
+/// Accounts in Postgres, for password sign-in and the flows around it.
+/// Written by `alula generate auth`.
+///
+/// List it in `Main.swift` beside `AlulaPasswordSignInModule`, which takes
+/// the `credentialStore` this provides:
+///
+/// ```swift
+/// AlulaPasswordSignInModule.self,
+/// AccountsModule.self,
+/// ```
+///
+/// Reads `auth.link-base-url`, where the links in its emails point, and
+/// `app.name` for their wording.
+struct AccountsModule: AlulaModule {
+    static var dependencies: [any AlulaModule.Type] {
+        [AlulaSecurityModule.self, AlulaSessionsModule.self]
+    }
+
+    /// Matched by type to `AlulaPasswordSignInModule`'s `store:`.
+    let credentialStore: any CredentialStore
+    /// The same accounts, with the operations the flows need.
+    let accounts: any AccountDirectory
+    /// Verification and reset links, stored in `account_tokens`.
+    let oneTimeTokens: OneTimeTokens
+    let authSettings: AuthSettings
+
+    /// The `accounts` lane: CSRF protection for the account routes, which a
+    /// form on another site could otherwise post to. A browser reads its
+    /// token from `GET /account/csrf` first.
+    let middleware: [MiddlewareRegistration]
+
+    init(configuration: Configuration, dataSource: PostgresDataSource) throws {
+        let accounts = PostgresAccounts(pool: dataSource)
+        self.credentialStore = accounts
+        self.accounts = accounts
+        self.oneTimeTokens = OneTimeTokens(store: PostgresAccountTokens(pool: dataSource))
+        self.authSettings = AuthSettings(
+            linkBase: try configuration.getIfPresent("auth.link-base-url") ?? "http://localhost:8080",
+            appName: try configuration.getIfPresent("app.name") ?? "App")
+        self.middleware = MiddlewareRegistration.lane("accounts", [CSRFProtection()])
+    }
+
+    init() {
+        preconditionFailure("AccountsModule is built by alulaComposeModules.")
+    }
+}
+
+"""#,
+            "Sources/Migrations/__TIMESTAMP___CreateAccounts.swift": #"""
+import AlulaMigrate
+
+/// Accounts for first-party sign-in, and the one-time tokens their emails
+/// carry. Written by `alula generate auth`.
+struct CreateAccounts: Migration {
+    func up(_ schema: SchemaBuilder) {
+        schema.raw(
+            """
+            CREATE TABLE accounts (
+                id uuid PRIMARY KEY,
+                email text NOT NULL,
+                name text NOT NULL,
+                password_hash text,
+                email_verified boolean NOT NULL DEFAULT false,
+                disabled boolean NOT NULL DEFAULT false,
+                roles text[] NOT NULL DEFAULT '{}',
+                created_at timestamptz NOT NULL,
+                updated_at timestamptz NOT NULL
+            )
+            """)
+        // Addresses are stored lowercased, so one person is one account
+        // however they type it.
+        schema.raw("CREATE UNIQUE INDEX accounts_email_idx ON accounts (email)")
+        schema.raw(
+            """
+            CREATE TABLE account_tokens (
+                key text PRIMARY KEY,
+                record bytea NOT NULL,
+                expires_at timestamptz NOT NULL
+            )
+            """)
+        schema.raw("CREATE INDEX account_tokens_expires_idx ON account_tokens (expires_at)")
+    }
+
+    func down(_ schema: SchemaBuilder) {
+        schema.raw("DROP TABLE account_tokens")
+        schema.raw("DROP TABLE accounts")
+    }
+}
+
+"""#,
+            "Tests/AppTests/AccountFlowsTests.swift": #"""
+import AlulaMail
+import AlulaMailTesting
+import AlulaQueueTesting
+import AlulaRateLimit
+import AlulaSecurityCore
+import AlulaWeb
+import Foundation
+import Synchronization
+import Testing
+
+@testable import App
+
+/// The account flows over an in-memory directory: every email they send is
+/// recorded, and the link in it followed. Written by `alula generate auth`.
+@Suite("Account flows")
+struct AccountFlowsTests {
+    struct Fixture {
+        let accounts = InMemoryAccounts()
+        let transport = RecordingMailTransport()
+        let sessions: InMemorySessionStore
+        let harness: QueueTestHarness
+        let flows: AccountFlows
+
+        init() throws {
+            let mailer = Mailer(transport: transport, defaultFrom: try MailAddress("app@example.com"))
+            let limiter = RateLimiter(store: InMemoryRateLimitStore())
+            sessions = InMemorySessionStore()
+            harness = QueueTestHarness(handlers: [mailer.deliveryHandler])
+            flows = AccountFlows(
+                accounts: accounts,
+                tokens: OneTimeTokens(store: InMemoryOneTimeTokenStore()),
+                authenticator: PasswordAuthenticator(
+                    store: accounts, issuer: "test", hasher: cheapHashing,
+                    limiter: limiter),
+                mailer: mailer, jobs: harness.queue,
+                sessions: SessionRuntime(store: sessions, settings: try SessionSettings()),
+                limiter: limiter,
+                settings: AuthSettings(linkBase: "https://app.test", appName: "Test"))
+        }
+
+        /// Delivers what the flows queued and returns the token in the last
+        /// email's link.
+        func tokenFromLastEmail() async throws -> String {
+            _ = await harness.drain()
+            let text = try #require(transport.sent.last?.text)
+            let link = try #require(text.split(separator: "\n").first { $0.contains("token=") })
+            return String(link.split(separator: "token=").last!)
+        }
+    }
+
+    @Test("registering, then following the emailed link, verifies the address")
+    func registerAndVerify() async throws {
+        let f = try Fixture()
+        try await f.flows.register(
+            name: "Ada", email: "Ada@Example.com", password: "correct horse battery",
+            clientAddress: "10.0.0.1")
+        let account = try #require(try await f.accounts.account(email: "ada@example.com"))
+        #expect(!account.emailVerified)
+
+        try await f.flows.verifyEmail(token: try await f.tokenFromLastEmail())
+        #expect(try await f.accounts.account(email: "ada@example.com")?.emailVerified == true)
+    }
+
+    @Test("registering a taken address creates nothing and emails the owner instead")
+    func registerTaken() async throws {
+        let f = try Fixture()
+        try await f.flows.register(
+            name: "Ada", email: "ada@example.com", password: "correct horse battery",
+            clientAddress: nil)
+        _ = await f.harness.drain()
+        try await f.flows.register(
+            name: "Mallory", email: "ada@example.com", password: "something else entirely",
+            clientAddress: nil)
+        _ = await f.harness.drain()
+        #expect(f.accounts.count == 1)
+        #expect(f.transport.sent.last?.subject.contains("already have") == true)
+    }
+
+    @Test("a reset link works once, and ends the account's sessions")
+    func resetPassword() async throws {
+        let f = try Fixture()
+        try await f.flows.register(
+            name: "Ada", email: "ada@example.com", password: "correct horse battery",
+            clientAddress: nil)
+        _ = await f.harness.drain()
+        let account = try #require(try await f.accounts.account(email: "ada@example.com"))
+        let signedIn = SessionID.generate()
+        try await f.sessions.save(
+            signedIn, Data("{}".utf8), ttl: .seconds(60), owner: account.credential.subject)
+
+        try await f.flows.requestPasswordReset(email: "ada@example.com", clientAddress: nil)
+        let token = try await f.tokenFromLastEmail()
+        try await f.flows.resetPassword(token: token, newPassword: "a whole new password")
+
+        #expect(try await f.sessions.load(signedIn) == nil)
+        await #expect(throws: OneTimeTokenError.invalidOrExpired) {
+            try await f.flows.resetPassword(token: token, newPassword: "and another one again")
+        }
+    }
+
+    @Test("changing the password voids reset links already sent")
+    func resetLinkDiesWithOldPassword() async throws {
+        let f = try Fixture()
+        try await f.flows.register(
+            name: "Ada", email: "ada@example.com", password: "correct horse battery",
+            clientAddress: nil)
+        _ = await f.harness.drain()
+        try await f.flows.requestPasswordReset(email: "ada@example.com", clientAddress: nil)
+        let token = try await f.tokenFromLastEmail()
+
+        let account = try #require(try await f.accounts.account(email: "ada@example.com"))
+        let principal = try await PasswordAuthenticator(
+            store: f.accounts, issuer: "test", hasher: cheapHashing,
+            limiter: RateLimiter(store: InMemoryRateLimitStore())
+        ).authenticate(identifier: account.email, password: "correct horse battery", clientAddress: nil)
+        try await f.flows.changePassword(
+            principal: principal, current: "correct horse battery", new: "changed it myself",
+            keeping: nil, clientAddress: nil)
+
+        await #expect(throws: OneTimeTokenError.invalidOrExpired) {
+            try await f.flows.resetPassword(token: token, newPassword: "the attacker's choice")
+        }
+    }
+
+    @Test("asking to reset an unknown address sends nothing and says nothing")
+    func resetUnknown() async throws {
+        let f = try Fixture()
+        try await f.flows.requestPasswordReset(email: "nobody@example.com", clientAddress: nil)
+        _ = await f.harness.drain()
+        #expect(f.transport.sent.isEmpty)
+    }
+
+    @Test("reset requests for one address are throttled")
+    func throttled() async throws {
+        let f = try Fixture()
+        for _ in 0..<5 {
+            try await f.flows.requestPasswordReset(email: "ada@example.com", clientAddress: nil)
+        }
+        await #expect(throws: HTTPError.self) {
+            try await f.flows.requestPasswordReset(email: "ada@example.com", clientAddress: nil)
+        }
+    }
+}
+
+/// Real Argon2id, at a cost that keeps the suite fast. Never in the app.
+let cheapHashing = Argon2idHashing(
+    parameters: .init(timeCost: 1, memoryCost: 64, parallelism: 1))
+
+/// An `AccountDirectory` in memory.
+final class InMemoryAccounts: AccountDirectory, Sendable {
+    private let rows = Mutex<[UUID: Account]>([:])
+
+    var count: Int { rows.withLock { $0.count } }
+
+    func account(email: String) async throws -> Account? {
+        rows.withLock { $0.values.first { $0.email == email.lowercased() } }
+    }
+
+    func account(id: UUID) async throws -> Account? {
+        rows.withLock { $0[id] }
+    }
+
+    func create(email: String, name: String, passwordHash: String) async throws -> Account {
+        try rows.withLock { rows in
+            guard !rows.values.contains(where: { $0.email == email.lowercased() }) else {
+                throw AccountExists()
+            }
+            let account = Account(
+                id: UUID(), email: email.lowercased(), name: name, passwordHash: passwordHash,
+                emailVerified: false, disabled: false, roles: [], createdAt: Date(),
+                updatedAt: Date())
+            rows[account.id] = account
+            return account
+        }
+    }
+
+    func markEmailVerified(id: UUID) async throws {
+        rows.withLock { $0[id]?.emailVerified = true }
+    }
+
+    func setPasswordHash(_ hash: String, id: UUID) async throws {
+        rows.withLock { $0[id]?.passwordHash = hash }
+    }
+
+    func credential(forIdentifier identifier: String) async throws -> StoredCredential? {
+        try await account(email: identifier)?.credential
+    }
+
+    func updatePasswordHash(_ hash: String, forSubject subject: String) async throws {
+        guard let id = UUID(uuidString: subject) else { return }
+        try await setPasswordHash(hash, id: id)
+    }
+}
+
+"""#,
+        ],
         "basics": [
             ".dockerignore": #"""
 .build
@@ -84,7 +795,7 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.44.0", traits: ["Web"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.45.0", traits: ["Web"]),
         .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.15.0", traits: ["Postgres"]),
     ],
     targets: [
@@ -847,7 +1558,7 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.44.0", traits: ["Security"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.45.0", traits: ["Security"]),
         .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.15.0", traits: ["Postgres"]),
     ],
     targets: [
@@ -2160,11 +2871,27 @@ struct AppModule: AlulaModule {
     /// Everything the queue worker runs. Just mail delivery here.
     let queueHandlers: [QueueHandler]
 
+    /// Tasks run instead of serving, with the application composed and only
+    /// its infrastructure (the database pool) started, so running one beside
+    /// a live server adds no second server and runs no jobs:
+    ///
+    ///     swift run App users        # or: alula run users
+    ///     swift run App commands     # what there is
+    let commands: [CommandRegistration]
+
     /// `RateLimiter` comes from `AlulaRateLimitModule`, matched by type in
     /// composition the way every other value a module takes is.
     init(graph: AlulaGraph, limiter: RateLimiter, mailer: Mailer) {
         self.graph = graph
         self.queueHandlers = [mailer.deliveryHandler]
+        let users = graph.userService
+        self.commands = [
+            CommandRegistration("users", abstract: "List every user, one per line") { _ in
+                for user in try await users.all() {
+                    print("\(user.email)\t\(user.name)")
+                }
+            }
+        ]
         self.jobCoordinator = PostgresJobCoordinator(dataSource: graph.postgresDataSource)
         self.errorMapper = AppErrorMapping.mapper()
         self.middleware = MiddlewareRegistration.lane(
@@ -5099,7 +5826,7 @@ let package = Package(
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // core: configuration, composition, and the service lifecycle.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.44.0", traits: ["Web"])
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.45.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
@@ -5265,5 +5992,7 @@ actuator:
         ],
     ]
 
-    static var tiers: [String] { files.keys.sorted() }
+    /// What `alula new --tier` offers. A directory starting with `_` is
+    /// written by a generator into an existing project, never a project of its own.
+    static var tiers: [String] { files.keys.filter { !$0.hasPrefix("_") }.sorted() }
 }

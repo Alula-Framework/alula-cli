@@ -136,7 +136,10 @@ for f in "$scratch"/cp*.sh; do
 
   status=0
   waited=0
-  limit="${CHECKPOINT_TIMEOUT:-90}"
+  # Longer than the tutorial's curl retry budget: a block's `swift run`
+  # recompiles what the checkpoint changed, which took over 30s on a CI
+  # runner and made cp08/cp09 fail with curl's "could not connect" (7).
+  limit="${CHECKPOINT_TIMEOUT:-240}"
   while kill -0 "$block" 2>/dev/null && [ "$waited" -lt "$limit" ]; do
     sleep 1
     waited=$((waited + 1))

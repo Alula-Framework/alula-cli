@@ -97,3 +97,45 @@ struct WatcherTests {
         #expect(!removed.keys.contains { $0.hasSuffix("B.swift") })
     }
 }
+
+@Suite("generators find the app target")
+struct AppTargetTests {
+    private func project(_ directories: [String]) throws -> Project {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(
+            "alula-target-\(UUID())")
+        for directory in directories {
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent("Sources/\(directory)"),
+                withIntermediateDirectories: true)
+        }
+        return Project(root: root)
+    }
+
+    @Test("the one target beside the migrations is the app, whatever it is called")
+    func found() throws {
+        #expect(try project(["Shop", "Migrations", "migrate"]).appTarget(nil) == "Shop")
+    }
+
+    @Test("--target wins, and several candidates without it are refused")
+    func ambiguous() throws {
+        let several = try project(["Shop", "Admin", "Migrations"])
+        #expect(try several.appTarget("Admin") == "Admin")
+        #expect(throws: CLIError.self) { try several.appTarget(nil) }
+    }
+}
+
+@Suite("alula generate auth")
+struct GenerateAuthTests {
+    @Test("the auth files are embedded, and not offered as a project template")
+    func embedded() throws {
+        let files = try #require(EmbeddedTemplates.files["_auth"])
+        #expect(files.keys.contains("Sources/App/Accounts/AccountFlows.swift"))
+        #expect(files.keys.contains { $0.hasPrefix("Sources/Migrations/__TIMESTAMP___") })
+        #expect(!EmbeddedTemplates.tiers.contains("_auth"))
+    }
+
+    @Test("timestamps are the fourteen UTC digits migrations are named with")
+    func timestamp() {
+        #expect(GenerateAuth.timestamp(Date(timeIntervalSince1970: 0)) == "19700101000000")
+    }
+}

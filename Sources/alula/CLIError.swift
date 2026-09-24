@@ -14,6 +14,8 @@ enum CLIError: Error, CustomStringConvertible {
     case noRouteManifest(String)
     case ambiguousProduct([String])
     case fileExists(String)
+    case missingProducts([String])
+    case ambiguousTarget([String])
 
     var description: String {
         switch self {
@@ -25,6 +27,17 @@ enum CLIError: Error, CustomStringConvertible {
             return "\(path) already exists. Choose another name, or pass --force to write into it."
         case .writeFailed(let path, let underlying):
             return "could not write \(path): \(underlying)"
+        case .ambiguousTarget(let targets):
+            return targets.isEmpty
+                ? "no application target under Sources/. Name one with --target."
+                : "Sources/ holds several targets (\(targets.joined(separator: ", "))). Name one with --target."
+        case .missingProducts(let products):
+            return """
+                the generated code needs \(products.joined(separator: ", ")), which this \
+                package's Package.swift does not name. Add them as dependencies of the app \
+                (the *Testing ones of its test target), with the Security trait on alula and \
+                the Postgres trait on alula-data — the demo template's Package.swift has all of them.
+                """
         case .fileExists(let path):
             return "\(path) already exists; nothing was written. Choose another name."
         case .ambiguousProduct(let products):

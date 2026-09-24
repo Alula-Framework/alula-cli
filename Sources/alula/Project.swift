@@ -39,6 +39,28 @@ struct Project {
         manifest.contains(#"name: "migrate""#)
     }
 
+    /// The application target generated code goes into: `explicit` when
+    /// given, otherwise the one directory under Sources/ that is not the
+    /// migrations. `alula new` names it after the project, so `App` cannot
+    /// be assumed.
+    func appTarget(_ explicit: String?) throws -> String {
+        if let explicit { return explicit }
+        let sources = root.appendingPathComponent("Sources")
+        let candidates =
+            ((try? FileManager.default.contentsOfDirectory(atPath: sources.path)) ?? [])
+            .filter { name in
+                var isDirectory: ObjCBool = false
+                return !name.hasPrefix(".") && name != "Migrations" && name != "migrate"
+                    && FileManager.default.fileExists(
+                        atPath: sources.appendingPathComponent(name).path, isDirectory: &isDirectory
+                    )
+                    && isDirectory.boolValue
+            }
+            .sorted()
+        guard candidates.count == 1 else { throw CLIError.ambiguousTarget(candidates) }
+        return candidates[0]
+    }
+
     var migrationsDirectory: URL {
         root.appendingPathComponent("Sources/Migrations")
     }

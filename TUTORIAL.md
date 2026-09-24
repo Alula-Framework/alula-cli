@@ -76,7 +76,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/Alula-Framework/alula.git",
-                 from: "0.44.0", traits: ["Web"])
+                 from: "0.45.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
@@ -244,7 +244,7 @@ reading `Configuration` directly.
 
 ```bash
 swift run App &
-curl -sf --retry 30 --retry-connrefused --retry-delay 1 localhost:8080/actuator/health
+curl -sf --retry 180 --retry-connrefused --retry-delay 1 localhost:8080/actuator/health
 curl localhost:8080/          # → App is flying
 curl localhost:8080/actuator/health
 kill %1
@@ -373,7 +373,7 @@ Note that `require` does **not** verify certificates; `verify-full` does.
 ```swift
 dependencies: [
     .package(url: "https://github.com/Alula-Framework/alula.git",
-             from: "0.44.0", traits: ["Web"]),
+             from: "0.45.0", traits: ["Web"]),
     .package(url: "https://github.com/Alula-Framework/alula-data.git",
              from: "0.15.0", traits: ["Postgres"]),
 ],
@@ -698,7 +698,7 @@ The full file, including `CreateUserRequest`, is in
 
 ```bash
 swift run App &
-curl -sf --retry 30 --retry-connrefused --retry-delay 1 localhost:8080/actuator/health
+curl -sf --retry 180 --retry-connrefused --retry-delay 1 localhost:8080/actuator/health
 curl -XPOST localhost:8080/users -H 'content-type: application/json' \
      -d '{"name":"Ada","email":"ada@example.com"}'          # → 201
 curl localhost:8080/users                                    # → [Ada]
@@ -1428,7 +1428,7 @@ it.
 
 ```bash
 swift run App &
-curl -sf --retry 30 --retry-connrefused --retry-delay 1 localhost:8080/actuator/health
+curl -sf --retry 180 --retry-connrefused --retry-delay 1 localhost:8080/actuator/health
 # the startup log names the scheduler's mode and job count
 kill %1
 ```
@@ -1703,7 +1703,7 @@ everything the protocol asks for.
 
 ```bash
 swift run App &
-curl -sf --retry 30 --retry-connrefused --retry-delay 1 localhost:8080/actuator/health
+curl -sf --retry 180 --retry-connrefused --retry-delay 1 localhost:8080/actuator/health
 
 TOKEN=demo:ada:moderator
 curl -XPOST localhost:8080/rooms -H 'content-type: application/json' \

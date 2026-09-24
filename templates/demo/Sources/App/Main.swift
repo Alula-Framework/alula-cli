@@ -110,11 +110,27 @@ struct AppModule: AlulaModule {
     /// Everything the queue worker runs. Just mail delivery here.
     let queueHandlers: [QueueHandler]
 
+    /// Tasks run instead of serving, with the application composed and only
+    /// its infrastructure (the database pool) started, so running one beside
+    /// a live server adds no second server and runs no jobs:
+    ///
+    ///     swift run App users        # or: alula run users
+    ///     swift run App commands     # what there is
+    let commands: [CommandRegistration]
+
     /// `RateLimiter` comes from `AlulaRateLimitModule`, matched by type in
     /// composition the way every other value a module takes is.
     init(graph: AlulaGraph, limiter: RateLimiter, mailer: Mailer) {
         self.graph = graph
         self.queueHandlers = [mailer.deliveryHandler]
+        let users = graph.userService
+        self.commands = [
+            CommandRegistration("users", abstract: "List every user, one per line") { _ in
+                for user in try await users.all() {
+                    print("\(user.email)\t\(user.name)")
+                }
+            }
+        ]
         self.jobCoordinator = PostgresJobCoordinator(dataSource: graph.postgresDataSource)
         self.errorMapper = AppErrorMapping.mapper()
         self.middleware = MiddlewareRegistration.lane(
