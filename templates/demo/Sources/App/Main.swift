@@ -3,6 +3,7 @@ import AlulaCache
 import AlulaChannels
 import AlulaCore
 import AlulaMail
+import AlulaOpenAPI
 import AlulaQueue
 import AlulaQueuePostgres
 import AlulaDataPostgres
@@ -71,6 +72,10 @@ struct AppModule: AlulaModule {
             AlulaQueuePostgresModule.self,
             AlulaQueueWorkerModule.self,
             AlulaMailModule.self,
+            // GET /openapi.json: every route and payload type, written by the
+            // build from the controllers below. Served in dev and test only
+            // unless `openapi.enabled: true`.
+            AlulaOpenAPIModule.self,
         ]
     }
 

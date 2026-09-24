@@ -26,8 +26,8 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.39.0", traits: ["Web"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.13.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.43.0", traits: ["Web"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.14.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -731,8 +731,8 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.39.0", traits: ["Security"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.13.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.43.0", traits: ["Security"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.14.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -745,6 +745,7 @@ let package = Package(
                 .product(name: "AlulaScheduler", package: "alula"),
                 .product(name: "AlulaQueue", package: "alula"),
                 .product(name: "AlulaMail", package: "alula"),
+                .product(name: "AlulaOpenAPI", package: "alula"),
                 .product(name: "AlulaQueuePostgres", package: "alula-data"),
                 .product(name: "AlulaSecurityCore", package: "alula"),
                 .product(name: "AlulaPubSub", package: "alula"),
@@ -1936,6 +1937,7 @@ import AlulaCache
 import AlulaChannels
 import AlulaCore
 import AlulaMail
+import AlulaOpenAPI
 import AlulaQueue
 import AlulaQueuePostgres
 import AlulaDataPostgres
@@ -2004,6 +2006,10 @@ struct AppModule: AlulaModule {
             AlulaQueuePostgresModule.self,
             AlulaQueueWorkerModule.self,
             AlulaMailModule.self,
+            // GET /openapi.json: every route and payload type, written by the
+            // build from the controllers below. Served in dev and test only
+            // unless `openapi.enabled: true`.
+            AlulaOpenAPIModule.self,
         ]
     }
 
@@ -3586,6 +3592,27 @@ struct DemoTokenValidatorTests {
 }
 
 """#,
+            "Tests/AppTests/OpenAPIDocumentTests.swift": #"""
+import Foundation
+import Testing
+@testable import App
+
+/// The document the build wrote from this application's controllers.
+@Suite("OpenAPI document")
+struct OpenAPIDocumentTests {
+    @Test("it describes the routes and the types they carry")
+    func describesTheAPI() throws {
+        let document = try #require(
+            try JSONSerialization.jsonObject(with: Data(alulaOpenAPIJSON().utf8)) as? [String: Any])
+        let paths = try #require(document["paths"] as? [String: Any])
+        #expect(paths["/user"] != nil)
+        let schemas = try #require(
+            (document["components"] as? [String: Any])?["schemas"] as? [String: Any])
+        #expect(schemas["CreateUserRequest"] != nil)
+    }
+}
+
+"""#,
             "Tests/AppTests/RateLimitingTests.swift": #"""
 import AlulaCore
 import AlulaRateLimit
@@ -4742,6 +4769,10 @@ actuator:
 mail:
   from: "Alula Demo <demo@example.com>"
 
+openapi:
+  title: Alula Demo API
+  version: 1.0.0
+
 # Channels: the per-socket outbound queue. When it fills, the OLDEST messages
 # are dropped — a client behind on a realtime feed wants current state, not a
 # backlog it can never catch up on. Drops are counted per socket and logged.
@@ -4865,7 +4896,7 @@ let package = Package(
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // core: configuration, composition, and the service lifecycle.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.39.0", traits: ["Web"])
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.43.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(

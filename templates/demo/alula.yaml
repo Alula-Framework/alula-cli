@@ -16,6 +16,10 @@ actuator:
 mail:
   from: "Alula Demo <demo@example.com>"
 
+openapi:
+  title: Alula Demo API
+  version: 1.0.0
+
 # Channels: the per-socket outbound queue. When it fills, the OLDEST messages
 # are dropped — a client behind on a realtime feed wants current state, not a
 # backlog it can never catch up on. Drops are counted per socket and logged.

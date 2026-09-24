@@ -16,8 +16,8 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.39.0", traits: ["Security"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.13.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.43.0", traits: ["Security"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.14.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -30,6 +30,7 @@ let package = Package(
                 .product(name: "AlulaScheduler", package: "alula"),
                 .product(name: "AlulaQueue", package: "alula"),
                 .product(name: "AlulaMail", package: "alula"),
+                .product(name: "AlulaOpenAPI", package: "alula"),
                 .product(name: "AlulaQueuePostgres", package: "alula-data"),
                 .product(name: "AlulaSecurityCore", package: "alula"),
                 .product(name: "AlulaPubSub", package: "alula"),
