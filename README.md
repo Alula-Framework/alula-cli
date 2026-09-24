@@ -43,6 +43,32 @@ is refused rather than emitted.
 The templates are embedded in the binary, so a generated project is
 byte-for-byte what CI built and tested — with the target renamed to yours.
 
+## Develop
+
+```sh
+alula dev                         # build, run, and rebuild + restart on every change
+alula routes                      # every route: method, path, lanes, handler
+alula routes --json
+alula generate controller Orders  # Sources/App/Controllers/OrdersController.swift + a test
+```
+
+`alula dev` restarts the app with SIGTERM, as an orchestrator would, so it
+drains and shuts down in order. A failed build leaves the previous one
+running.
+
+## Ship
+
+Every template has a `Dockerfile`: a release build with the static Swift
+standard library on a small Ubuntu base, run as a non-root user with
+`ALULA_ENV=prod`. Projects with migrations get the `migrate` tool in the same
+image:
+
+```sh
+docker build -t app .
+docker run --entrypoint ./migrate -e ALULA_DATABASE_URL=... app apply
+docker run -p 8080:8080 -e ALULA_DATASOURCE_PRIMARY_URL=... app
+```
+
 ## Run migrations
 
 ```bash

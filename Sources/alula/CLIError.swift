@@ -11,6 +11,9 @@ enum CLIError: Error, CustomStringConvertible {
     case manifestUnrecognised(String)
     case unknownCapability(String, available: [String])
     case tierRequiresCapability(tier: String, missing: [String])
+    case noRouteManifest(String)
+    case ambiguousProduct([String])
+    case fileExists(String)
 
     var description: String {
         switch self {
@@ -22,6 +25,17 @@ enum CLIError: Error, CustomStringConvertible {
             return "\(path) already exists. Choose another name, or pass --force to write into it."
         case .writeFailed(let path, let underlying):
             return "could not write \(path): \(underlying)"
+        case .fileExists(let path):
+            return "\(path) already exists; nothing was written. Choose another name."
+        case .ambiguousProduct(let products):
+            return products.isEmpty
+                ? "this package has no executable product to run."
+                : "this package has several executables (\(products.joined(separator: ", "))). Pick one with --product."
+        case .noRouteManifest(let path):
+            return """
+                no route manifest under \(path)/.build/plugins/outputs. Build the project first \
+                (drop --no-build), and check its target uses AlulaRegistrationPlugin.
+                """
         case .notAPackage(let path):
             return """
                 no Package.swift found in \(path) or any parent directory. \
