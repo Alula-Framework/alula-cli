@@ -2,6 +2,8 @@ import AlulaActuator
 import AlulaChannels
 import AlulaCache
 import AlulaCore
+import AlulaMail
+import AlulaQueue
 import AlulaRateLimit
 import AlulaDataPostgres
 import AlulaPresence
@@ -39,8 +41,11 @@ struct BootstrapTests {
         // alone needs — the broadcaster, the socket stack, the validator — are
         // parameters of `alulaRoutes`, which keeps the graph free of Channels
         // and so lets channels be built from the graph.
+        let queue = try AlulaQueueModule(configuration: configuration)
+        let mail = try AlulaMailModule(configuration: configuration)
         let graph = try AlulaGraph(
-            configuration: configuration, postgresDataSource: postgres.dataSource)
+            configuration: configuration, postgresDataSource: postgres.dataSource,
+            mailer: mail.mailer, jobQueue: queue.queue)
         let presenceModule = try AlulaPresenceModule(
             configuration: configuration, localBus: pubsub.local, gossipBus: pubsub.bus)
         let demoChannels = DemoChannelsModule(
@@ -58,7 +63,11 @@ struct BootstrapTests {
                 pubsub,
                 demoChannels,
                 channels,
-                AppModule(graph: graph, limiter: RateLimiter(store: InMemoryRateLimitStore())),
+                queue,
+                mail,
+                AppModule(
+                    graph: graph, limiter: RateLimiter(store: InMemoryRateLimitStore()),
+                    mailer: mail.mailer),
                 AlulaSecurityModule(validator: auth.tokenValidator),
                 try AlulaPasswordSignInModule(
                     configuration: configuration,

@@ -2,6 +2,9 @@ import AlulaActuator
 import AlulaCache
 import AlulaChannels
 import AlulaCore
+import AlulaMail
+import AlulaQueue
+import AlulaQueuePostgres
 import AlulaDataPostgres
 import AlulaPresence
 import AlulaPubSub
@@ -60,6 +63,14 @@ struct AppModule: AlulaModule {
             // `AlulaRateLimitValkeyModule` makes a quota mean one thing
             // across every replica instead of one thing per replica.
             AlulaRateLimitModule.self,
+            // Background jobs, kept in Postgres (the `alula_jobs` table, created
+            // by the CreateJobs migration), and email sent through them. In
+            // development mail is logged rather than sent; anywhere else,
+            // AlulaMailModule refuses to start without a transport — add
+            // AlulaMailSMTPModule (the "SMTP" trait) and `mail.smtp.*`.
+            AlulaQueuePostgresModule.self,
+            AlulaQueueWorkerModule.self,
+            AlulaMailModule.self,
         ]
     }
 
@@ -91,10 +102,14 @@ struct AppModule: AlulaModule {
     /// which the composer aggregates middleware into.
     let middleware: [MiddlewareRegistration]
 
+    /// Everything the queue worker runs. Just mail delivery here.
+    let queueHandlers: [QueueHandler]
+
     /// `RateLimiter` comes from `AlulaRateLimitModule`, matched by type in
     /// composition the way every other value a module takes is.
-    init(graph: AlulaGraph, limiter: RateLimiter) {
+    init(graph: AlulaGraph, limiter: RateLimiter, mailer: Mailer) {
         self.graph = graph
+        self.queueHandlers = [mailer.deliveryHandler]
         self.jobCoordinator = PostgresJobCoordinator(dataSource: graph.postgresDataSource)
         self.errorMapper = AppErrorMapping.mapper()
         self.middleware = MiddlewareRegistration.lane(

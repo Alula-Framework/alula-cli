@@ -19,7 +19,7 @@ let package = Package(
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // core: configuration, composition, and the service lifecycle.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.38.0", traits: ["Web"])
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.39.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(

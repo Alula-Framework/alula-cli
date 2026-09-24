@@ -16,7 +16,7 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.38.0", traits: ["Security"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.39.0", traits: ["Security"]),
         .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.13.0", traits: ["Postgres"]),
     ],
     targets: [
@@ -28,6 +28,9 @@ let package = Package(
                 .product(name: "AlulaTransport", package: "alula"),
                 .product(name: "AlulaActuator", package: "alula"),
                 .product(name: "AlulaScheduler", package: "alula"),
+                .product(name: "AlulaQueue", package: "alula"),
+                .product(name: "AlulaMail", package: "alula"),
+                .product(name: "AlulaQueuePostgres", package: "alula-data"),
                 .product(name: "AlulaSecurityCore", package: "alula"),
                 .product(name: "AlulaPubSub", package: "alula"),
                 .product(name: "AlulaRateLimit", package: "alula"),
@@ -70,6 +73,10 @@ let package = Package(
                 .product(name: "AlulaWebTesting", package: "alula"),
                 .product(name: "AlulaSessionsTesting", package: "alula"),
                 .product(name: "AlulaRateLimitTesting", package: "alula"),
+                .product(name: "AlulaQueue", package: "alula"),
+                .product(name: "AlulaQueueTesting", package: "alula"),
+                .product(name: "AlulaMail", package: "alula"),
+                .product(name: "AlulaMailTesting", package: "alula"),
                 .product(name: "AlulaChannels", package: "alula"),
                 .product(name: "AlulaChannelsTesting", package: "alula"),
                 .product(name: "AlulaChannelsClient", package: "alula"),

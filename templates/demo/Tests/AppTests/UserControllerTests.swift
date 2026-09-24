@@ -1,4 +1,6 @@
 import AlulaCore
+import AlulaMail
+import AlulaQueueTesting
 import AlulaWeb
 import AlulaWebTesting
 import Foundation
@@ -20,7 +22,7 @@ let ada = User(
 struct UserControllerTests {
 
     private func controller(_ repository: MockUserRepository) -> UserController {
-        UserController(users: UserService(repository: repository))
+        UserController(users: UserService(repository: repository, mailer: .testing, jobs: QueueTestHarness().queue))
     }
 
     @Test("listUsers returns what the repository holds")
@@ -90,7 +92,7 @@ struct UserRoutesEndToEndTests {
         // a route to the controller and this keeps working unchanged.
         try TestClient(
             routes: UserController.alulaRoutes { _ in
-                UserController(users: UserService(repository: repository))
+                UserController(users: UserService(repository: repository, mailer: .testing, jobs: QueueTestHarness().queue))
             })
     }
 

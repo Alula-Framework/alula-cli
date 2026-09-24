@@ -1,4 +1,6 @@
 import AlulaCore
+import AlulaMail
+import AlulaQueue
 import AlulaDataPostgres
 import Foundation
 
@@ -14,6 +16,10 @@ import Foundation
 @Service
 struct UserService {
     @Inject var repository: (any UserRepositoryProtocol)
+    /// Mail goes through the queue: signing up neither waits on a mail
+    /// server nor fails when one is down. See Docs/mail.md in alula.
+    @Inject var mailer: Mailer
+    @Inject var jobs: JobQueue
 
     func all() async throws -> [User] {
         try await repository.all()
@@ -36,7 +42,14 @@ struct UserService {
             .validate(\.email, .email)
         guard changeset.isValid else { throw ChangesetValidationError(errors: changeset.errors) }
         try await repository.apply(changeset)
-        return try await repository.find(byEmail: email)!
+        let user = try await repository.find(byEmail: email)!
+        try await mailer.sendLater(
+            MailMessage(
+                to: [try MailAddress(user.email, name: user.name)],
+                subject: "Welcome to the Alula demo",
+                text: "Hello \(user.name), your account is ready."),
+            via: jobs)
+        return user
     }
 
     func update(id: UUID, changeset: Changeset<User>) async throws -> User? {

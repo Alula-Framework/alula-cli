@@ -26,7 +26,7 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.38.0", traits: ["Web"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.39.0", traits: ["Web"]),
         .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.13.0", traits: ["Postgres"]),
     ],
     targets: [
@@ -731,7 +731,7 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.38.0", traits: ["Security"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.39.0", traits: ["Security"]),
         .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.13.0", traits: ["Postgres"]),
     ],
     targets: [
@@ -743,6 +743,9 @@ let package = Package(
                 .product(name: "AlulaTransport", package: "alula"),
                 .product(name: "AlulaActuator", package: "alula"),
                 .product(name: "AlulaScheduler", package: "alula"),
+                .product(name: "AlulaQueue", package: "alula"),
+                .product(name: "AlulaMail", package: "alula"),
+                .product(name: "AlulaQueuePostgres", package: "alula-data"),
                 .product(name: "AlulaSecurityCore", package: "alula"),
                 .product(name: "AlulaPubSub", package: "alula"),
                 .product(name: "AlulaRateLimit", package: "alula"),
@@ -785,6 +788,10 @@ let package = Package(
                 .product(name: "AlulaWebTesting", package: "alula"),
                 .product(name: "AlulaSessionsTesting", package: "alula"),
                 .product(name: "AlulaRateLimitTesting", package: "alula"),
+                .product(name: "AlulaQueue", package: "alula"),
+                .product(name: "AlulaQueueTesting", package: "alula"),
+                .product(name: "AlulaMail", package: "alula"),
+                .product(name: "AlulaMailTesting", package: "alula"),
                 .product(name: "AlulaChannels", package: "alula"),
                 .product(name: "AlulaChannelsTesting", package: "alula"),
                 .product(name: "AlulaChannelsClient", package: "alula"),
@@ -1928,6 +1935,9 @@ import AlulaActuator
 import AlulaCache
 import AlulaChannels
 import AlulaCore
+import AlulaMail
+import AlulaQueue
+import AlulaQueuePostgres
 import AlulaDataPostgres
 import AlulaPresence
 import AlulaPubSub
@@ -1986,6 +1996,14 @@ struct AppModule: AlulaModule {
             // `AlulaRateLimitValkeyModule` makes a quota mean one thing
             // across every replica instead of one thing per replica.
             AlulaRateLimitModule.self,
+            // Background jobs, kept in Postgres (the `alula_jobs` table, created
+            // by the CreateJobs migration), and email sent through them. In
+            // development mail is logged rather than sent; anywhere else,
+            // AlulaMailModule refuses to start without a transport — add
+            // AlulaMailSMTPModule (the "SMTP" trait) and `mail.smtp.*`.
+            AlulaQueuePostgresModule.self,
+            AlulaQueueWorkerModule.self,
+            AlulaMailModule.self,
         ]
     }
 
@@ -2017,10 +2035,14 @@ struct AppModule: AlulaModule {
     /// which the composer aggregates middleware into.
     let middleware: [MiddlewareRegistration]
 
+    /// Everything the queue worker runs. Just mail delivery here.
+    let queueHandlers: [QueueHandler]
+
     /// `RateLimiter` comes from `AlulaRateLimitModule`, matched by type in
     /// composition the way every other value a module takes is.
-    init(graph: AlulaGraph, limiter: RateLimiter) {
+    init(graph: AlulaGraph, limiter: RateLimiter, mailer: Mailer) {
         self.graph = graph
+        self.queueHandlers = [mailer.deliveryHandler]
         self.jobCoordinator = PostgresJobCoordinator(dataSource: graph.postgresDataSource)
         self.errorMapper = AppErrorMapping.mapper()
         self.middleware = MiddlewareRegistration.lane(
@@ -2920,6 +2942,8 @@ struct RoomDigestService: DigestInvalidating, DigestReading {
 """#,
             "Sources/App/Services/UserService.swift": #"""
 import AlulaCore
+import AlulaMail
+import AlulaQueue
 import AlulaDataPostgres
 import Foundation
 
@@ -2935,6 +2959,10 @@ import Foundation
 @Service
 struct UserService {
     @Inject var repository: (any UserRepositoryProtocol)
+    /// Mail goes through the queue: signing up neither waits on a mail
+    /// server nor fails when one is down. See Docs/mail.md in alula.
+    @Inject var mailer: Mailer
+    @Inject var jobs: JobQueue
 
     func all() async throws -> [User] {
         try await repository.all()
@@ -2957,7 +2985,14 @@ struct UserService {
             .validate(\.email, .email)
         guard changeset.isValid else { throw ChangesetValidationError(errors: changeset.errors) }
         try await repository.apply(changeset)
-        return try await repository.find(byEmail: email)!
+        let user = try await repository.find(byEmail: email)!
+        try await mailer.sendLater(
+            MailMessage(
+                to: [try MailAddress(user.email, name: user.name)],
+                subject: "Welcome to the Alula demo",
+                text: "Hello \(user.name), your account is ready."),
+            via: jobs)
+        return user
     }
 
     func update(id: UUID, changeset: Changeset<User>) async throws -> User? {
@@ -3199,6 +3234,58 @@ struct AddChatGraph: Migration {
 }
 
 """#,
+            "Sources/Migrations/20260924120000_CreateJobs.swift": #"""
+import AlulaMigrate
+
+/// The job queue's table (alula-data's `PostgresQueueStore`). The SQL is
+/// written out here rather than taken from `PostgresQueueStore.schema()`:
+/// a migration is recorded by checksum, so it must not change when a
+/// library does.
+struct CreateJobs: Migration {
+    func up(_ schema: SchemaBuilder) {
+        schema.raw(
+            """
+            CREATE TABLE alula_jobs (
+                id uuid PRIMARY KEY,
+                kind text NOT NULL,
+                queue text NOT NULL,
+                payload jsonb NOT NULL,
+                state text NOT NULL
+                    CHECK (state IN ('available', 'running', 'completed', 'discarded')),
+                priority integer NOT NULL DEFAULT 0,
+                attempt integer NOT NULL DEFAULT 0,
+                max_attempts integer NOT NULL,
+                run_at timestamptz NOT NULL,
+                lease_until timestamptz,
+                unique_key text,
+                last_error text,
+                inserted_at timestamptz NOT NULL,
+                finished_at timestamptz
+            )
+            """)
+        schema.raw(
+            """
+            CREATE INDEX alula_jobs_claim_idx ON alula_jobs (queue, priority, run_at, id)
+            WHERE state IN ('available', 'running')
+            """)
+        schema.raw(
+            """
+            CREATE UNIQUE INDEX alula_jobs_unique_idx ON alula_jobs (kind, unique_key)
+            WHERE unique_key IS NOT NULL AND state IN ('available', 'running')
+            """)
+        schema.raw(
+            """
+            CREATE INDEX alula_jobs_finished_idx ON alula_jobs (finished_at)
+            WHERE state IN ('completed', 'discarded')
+            """)
+    }
+
+    func down(_ schema: SchemaBuilder) {
+        schema.raw("DROP TABLE alula_jobs")
+    }
+}
+
+"""#,
             "Sources/Migrations/README.swift": #"""
 // Migration files land here as <14-digit-UTC-timestamp>_<TypeName>.swift,
 // generated by `swift run migrate create <TypeName>`. Non-digit-prefixed
@@ -3283,6 +3370,8 @@ import AlulaActuator
 import AlulaChannels
 import AlulaCache
 import AlulaCore
+import AlulaMail
+import AlulaQueue
 import AlulaRateLimit
 import AlulaDataPostgres
 import AlulaPresence
@@ -3320,8 +3409,11 @@ struct BootstrapTests {
         // alone needs — the broadcaster, the socket stack, the validator — are
         // parameters of `alulaRoutes`, which keeps the graph free of Channels
         // and so lets channels be built from the graph.
+        let queue = try AlulaQueueModule(configuration: configuration)
+        let mail = try AlulaMailModule(configuration: configuration)
         let graph = try AlulaGraph(
-            configuration: configuration, postgresDataSource: postgres.dataSource)
+            configuration: configuration, postgresDataSource: postgres.dataSource,
+            mailer: mail.mailer, jobQueue: queue.queue)
         let presenceModule = try AlulaPresenceModule(
             configuration: configuration, localBus: pubsub.local, gossipBus: pubsub.bus)
         let demoChannels = DemoChannelsModule(
@@ -3339,7 +3431,11 @@ struct BootstrapTests {
                 pubsub,
                 demoChannels,
                 channels,
-                AppModule(graph: graph, limiter: RateLimiter(store: InMemoryRateLimitStore())),
+                queue,
+                mail,
+                AppModule(
+                    graph: graph, limiter: RateLimiter(store: InMemoryRateLimitStore()),
+                    mailer: mail.mailer),
                 AlulaSecurityModule(validator: auth.tokenValidator),
                 try AlulaPasswordSignInModule(
                     configuration: configuration,
@@ -4330,6 +4426,8 @@ final class MockUserRepository: UserRepositoryProtocol, Sendable {
 """#,
             "Tests/AppTests/UserControllerTests.swift": #"""
 import AlulaCore
+import AlulaMail
+import AlulaQueueTesting
 import AlulaWeb
 import AlulaWebTesting
 import Foundation
@@ -4351,7 +4449,7 @@ let ada = User(
 struct UserControllerTests {
 
     private func controller(_ repository: MockUserRepository) -> UserController {
-        UserController(users: UserService(repository: repository))
+        UserController(users: UserService(repository: repository, mailer: .testing, jobs: QueueTestHarness().queue))
     }
 
     @Test("listUsers returns what the repository holds")
@@ -4421,7 +4519,7 @@ struct UserRoutesEndToEndTests {
         // a route to the controller and this keeps working unchanged.
         try TestClient(
             routes: UserController.alulaRoutes { _ in
-                UserController(users: UserService(repository: repository))
+                UserController(users: UserService(repository: repository, mailer: .testing, jobs: QueueTestHarness().queue))
             })
     }
 
@@ -4470,6 +4568,9 @@ private struct UserPayload: Decodable {
 """#,
             "Tests/AppTests/UserServiceTests.swift": #"""
 import AlulaCore
+import AlulaMail
+import AlulaMailTesting
+import AlulaQueueTesting
 import AlulaWebTesting
 import Foundation
 import Testing
@@ -4485,7 +4586,7 @@ struct UserServiceTests {
     private func makeService(repository: MockUserRepository) -> UserService {
         // The service under test, built with the fake the way the composer
         // builds it from the graph — the repository is injected by value.
-        UserService(repository: repository)
+        UserService(repository: repository, mailer: .testing, jobs: QueueTestHarness().queue)
     }
 
     @Test("find(byID:) returns the matching user from the mocked repository")
@@ -4505,6 +4606,35 @@ struct UserServiceTests {
             repository: MockUserRepository()).find(byID: UUID())
 
         #expect(found == nil)
+    }
+
+    @Test("signing up queues a welcome email instead of sending it inline")
+    func signupQueuesWelcomeMail() async throws {
+        let transport = RecordingMailTransport()
+        let mailer = Mailer(transport: transport, defaultFrom: try MailAddress("demo@example.com"))
+        let harness = QueueTestHarness(handlers: [mailer.deliveryHandler])
+        // The mock records changesets without applying them, so the user the
+        // signup reads back is seeded.
+        let ada = User(
+            id: UUID(), name: "Ada", email: "ada@example.com",
+            createdAt: Date(), updatedAt: Date())
+        let service = UserService(
+            repository: MockUserRepository(users: [ada]), mailer: mailer, jobs: harness.queue)
+
+        let user = try await service.signup(name: "Ada", email: "ada@example.com")
+        // Nothing is sent while the request is still running...
+        #expect(transport.sent.isEmpty)
+        // ...and the worker delivers it.
+        #expect(await harness.drain() == [.completed])
+        #expect(transport.sent.first?.to.first?.address == user.email)
+        #expect(transport.sent.first?.subject == "Welcome to the Alula demo")
+    }
+}
+
+extension Mailer {
+    /// Records rather than sends; for tests that do not look at mail.
+    static var testing: Mailer {
+        Mailer(transport: RecordingMailTransport(), defaultFrom: try! MailAddress("demo@example.com"))
     }
 }
 
@@ -4608,6 +4738,9 @@ datasource:
 
 actuator:
   format: ssr
+
+mail:
+  from: "Alula Demo <demo@example.com>"
 
 # Channels: the per-socket outbound queue. When it fills, the OLDEST messages
 # are dropped — a client behind on a realtime feed wants current state, not a
@@ -4732,7 +4865,7 @@ let package = Package(
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // core: configuration, composition, and the service lifecycle.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.38.0", traits: ["Web"])
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.39.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
