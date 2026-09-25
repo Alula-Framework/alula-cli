@@ -32,7 +32,7 @@ struct Explain: ParsableCommand {
     /// The page for `query`, formatted for a terminal.
     static func page(for query: String) throws -> String {
         guard let code = lookup(query) else {
-            if let hangar = hangarPage(for: query) { return hangar }
+            if let external = externalPage(for: query) { return external }
             throw CLIError.unknownDiagnosticCode(query, suggestions: suggestions(for: query))
         }
         guard let page = code.page else {
@@ -43,13 +43,20 @@ struct Explain: ParsableCommand {
         return terminal(page) + "\nOnline: \(code.documentationURL)"
     }
 
-    /// Hangar's query codes live with Hangar, which does not depend on Alula,
-    /// so their pages are Hangar's to publish; point at them.
-    static func hangarPage(for query: String) -> String? {
+    /// Hangar's and alula-data's codes live with those packages — Hangar does
+    /// not depend on Alula, and alula-data releases on its own — so their
+    /// pages are theirs to publish; point at them.
+    static func externalPage(for query: String) -> String? {
         let id = query.uppercased().trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
-        guard id.wholeMatch(of: /HGR-QUERY-\d{4}/) != nil else { return nil }
-        return "\(id) is a Hangar query diagnostic. Its page:\n"
-            + "https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/\(id).md"
+        let owners: [(pattern: Regex<Substring>, name: String, repository: String)] = [
+            (/HGR-QUERY-\d{4}/, "a Hangar query diagnostic", "hangar"),
+            (/ALD-[A-Z]+-\d{4}/, "an alula-data diagnostic", "alula-data"),
+        ]
+        guard let owner = owners.first(where: { id.wholeMatch(of: $0.pattern) != nil }) else {
+            return nil
+        }
+        return "\(id) is \(owner.name). Its page:\n"
+            + "https://github.com/Alula-Framework/\(owner.repository)/blob/main/Diagnostics/\(id).md"
     }
 
     /// Exact id, case-insensitive; or the number alone, when one code has it.

@@ -41,10 +41,13 @@ struct ExplainCommandTests {
         #expect(Explain.suggestions(for: "not-a-code").isEmpty)
     }
 
-    @Test("a Hangar code points at Hangar's page")
+    @Test("a Hangar or alula-data code points at its own page")
     func hangarCode() throws {
         let page = try Explain.page(for: "[hgr-query-4001]")
         #expect(page.hasSuffix("/hangar/blob/main/Diagnostics/HGR-QUERY-4001.md"))
+        #expect(
+            try Explain.page(for: "ALD-MIGRATE-2003")
+                .hasSuffix("/alula-data/blob/main/Diagnostics/ALD-MIGRATE-2003.md"))
     }
 
     @Test("the listing names every code once")
