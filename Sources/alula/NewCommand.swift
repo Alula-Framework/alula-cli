@@ -105,5 +105,11 @@ struct New: AsyncParsableCommand {
             print("             swift run migrate apply")
         }
         print("  swift run \(project.value)")
+        let remaining = Capability.remainingSteps(tier: tier, requested: requested)
+        if !remaining.isEmpty {
+            print("")
+            print("The \(tier) template does not wire everything --with enabled:")
+            for line in remaining { print("  " + line) }
+        }
     }
 }

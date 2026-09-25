@@ -57,4 +57,17 @@ struct TraitsTests {
         #expect(Capability.required(byTier: "demo") == [.postgres, .security])
         #expect(Capability.required(byTier: "skeleton").isEmpty)
     }
+
+    /// Relay #1: `--with valkey,security` on basics turned the traits on and
+    /// wired nothing, and nothing said so.
+    @Test("capabilities beyond what the tier wires come with the steps left")
+    func remainingSteps() {
+        let steps = Capability.remainingSteps(
+            tier: "basics", requested: [.postgres, .valkey, .security])
+        #expect(steps.contains { $0.hasPrefix("valkey:") })
+        #expect(steps.contains { $0.hasPrefix("security:") })
+        #expect(!steps.contains { $0.hasPrefix("postgres:") }, "basics wires postgres itself")
+        #expect(steps.contains { $0.contains("AlulaOIDCModule.self") })
+        #expect(Capability.remainingSteps(tier: "demo", requested: [.postgres, .security]).isEmpty)
+    }
 }
