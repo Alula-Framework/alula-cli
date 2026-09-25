@@ -212,7 +212,10 @@ for f in "$scratch"/cp*.sh; do
   sleep 1
   pkill -KILL -s "$block" 2>/dev/null || true
   sleep 1
-  if survivors=$(pgrep -a -s "$block"); then
+  # Zombies do not count: CI's container has no init to reap them, and an
+  # exited process holds no port and answers nothing.
+  survivors=$(ps -e -o pid=,sid=,stat=,args= | awk -v sid="$block" '$2 == sid && $3 !~ /^Z/')
+  if [ -n "$survivors" ]; then
     echo "  ✘ $name left processes running, which would answer the next checkpoint's requests:"
     echo "$survivors" | sed 's/^/      /'
     failed=$((failed + 1))
