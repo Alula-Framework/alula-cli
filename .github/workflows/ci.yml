@@ -259,10 +259,15 @@ jobs:
     name: Build on macOS
     runs-on: macos-15
     steps:
+      # Into alula-cli/, never the workspace root: called from alula's CI the
+      # root is a directory named `alula`, SwiftPM takes the root package's
+      # identity from its directory, and alula-cli would collide with its own
+      # `alula` dependency.
       - uses: actions/checkout@v4
         with:
           repository: Alula-Framework/alula-cli
           ref: ${{ inputs.alula_ref != '' && 'main' || github.sha }}
+          path: alula-cli
 
       # swiftly rather than swift-actions/setup-swift: this package declares
       # swift-tools-version 6.3, and setup-swift only indexes up to 6.2.
@@ -282,7 +287,9 @@ jobs:
       # people install with Homebrew has to compile on the platform Homebrew
       # runs on, and nothing had ever compiled it there.
       - name: Build
+        working-directory: alula-cli
         run: swift build
 
       - name: Unit tests
+        working-directory: alula-cli
         run: swift test
