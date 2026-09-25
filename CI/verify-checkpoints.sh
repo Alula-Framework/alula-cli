@@ -94,8 +94,21 @@ for f in "$scratch"/cp*.sh; do
 
   # A fresh project per checkpoint: they are meant to be run in order from a
   # clean start, and sharing one would let an earlier failure hide a later.
-  work="$scratch/run-$name"
+  #
+  # Fresh *sources*, that is. The build directory is carried from one
+  # checkpoint of a tier to the next, at the same path, because compiling
+  # alula, alula-data, Hangar, NIO and PostgresNIO again for every checkpoint
+  # was most of this job's 37 minutes, and none of it was what a checkpoint
+  # checks. The path must stay the same: SwiftPM's products record absolute
+  # paths, and a cache moved elsewhere rebuilds from scratch. Everything else
+  # in the directory — sources, alula.yaml, anything a previous checkpoint
+  # wrote — is deleted and generated again.
+  work="$scratch/tier-$tier"
+  cache="$scratch/build-cache-$tier"
+  [ -d "$work/.build" ] && mv "$work/.build" "$cache"
+  rm -rf "$work"
   "$cli" new App --tier "$tier" --path "$work" >/dev/null 2>&1
+  [ -d "$cache" ] && mv "$cache" "$work/.build"
 
   # The tutorial hardcodes a local database URL; CI's is elsewhere. Both of
   # these are needed, because the two halves read different sources:
@@ -140,6 +153,14 @@ for f in "$scratch"/cp*.sh; do
   # recompiles what the checkpoint changed, which took over 30s on a CI
   # runner and made cp08/cp09 fail with curl's "could not connect" (7).
   limit="${CHECKPOINT_TIMEOUT:-240}"
+  # A block that serves until interrupted passes by still running at the
+  # deadline, so waiting the full budget cost four minutes a run for nothing.
+  # Its build is warm and its `swift run` recompiles one change, which is
+  # well inside 90s even on a slow runner — and short of that it would pass
+  # while still compiling, proving less than it claims.
+  if grep -qiE 'ctrl-c|until you (press|interrupt)' "$f"; then
+    limit="${CHECKPOINT_SERVE_TIMEOUT:-90}"
+  fi
   while kill -0 "$block" 2>/dev/null && [ "$waited" -lt "$limit" ]; do
     sleep 1
     waited=$((waited + 1))
@@ -148,7 +169,7 @@ for f in "$scratch"/cp*.sh; do
     # Still serving at the deadline: the pass condition for the interactive
     # checkpoints. SIGINT first, as Ctrl-C would.
     status=124
-    kill -INT -- "-$block" 2>/dev/null || true
+    pkill -INT -s "$block" 2>/dev/null || true
     sleep 2
   else
     wait "$block"
@@ -180,12 +201,22 @@ for f in "$scratch"/cp*.sh; do
          failed=$((failed + 1)) ;;
   esac
 
-  # Nothing from one checkpoint may outlive it into the next. Killing the
-  # process *group* is what makes this actually true — see the setsid note
-  # above for why matching on the work directory does not.
-  kill -TERM -- "-$block" 2>/dev/null || true
+  # Nothing from one checkpoint may outlive it into the next — see the setsid
+  # note above for why matching on the work directory does not work either.
+  # By session, not process group. `set -m` gives every job in the block
+  # its own group, so a group kill reached the block's shell and missed the
+  # server it ran: that server kept port 8080, and later checkpoints' curls
+  # exited 0 against it. `setsid` made one session for all of them, and job
+  # control does not leave it.
+  pkill -TERM -s "$block" 2>/dev/null || true
   sleep 1
-  kill -KILL -- "-$block" 2>/dev/null || true
+  pkill -KILL -s "$block" 2>/dev/null || true
+  sleep 1
+  if survivors=$(pgrep -a -s "$block"); then
+    echo "  ✘ $name left processes running, which would answer the next checkpoint's requests:"
+    echo "$survivors" | sed 's/^/      /'
+    failed=$((failed + 1))
+  fi
 done
 
 echo "  ── $total checkpoint(s): $((total - failed - skipped)) passed, $failed failed, $skipped skipped"
