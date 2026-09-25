@@ -59,6 +59,17 @@ for tier in "${tiers[@]}"; do
   # it should say what broke.
   log="$scratch/$tier.log"
   if (cd "$work" && swift build >"$log" 2>&1) && (cd "$work" && swift test >>"$log" 2>&1); then
+    # A template that builds with warnings teaches every new project to
+    # ignore them — alula 0.51.0 made the demo warn on its own routes, and a
+    # green build said nothing. Warnings about the template's own files fail
+    # the tier; the dependencies' are theirs to answer for.
+    own_warnings=$(grep -E "^$work/[^ ]*: warning:" "$log" | awk '!seen[$0]++' || true)
+    if [ -n "$own_warnings" ]; then
+      echo "✘ $tier builds with warnings in its own sources:"
+      echo "$own_warnings" | sed "s|^$work/||" | head -20
+      failed=1
+      continue
+    fi
     tail -3 "$log"
     echo "✔ $tier"
   else

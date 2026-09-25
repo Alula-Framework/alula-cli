@@ -84,14 +84,14 @@ struct PostgresAccounts: AccountDirectory {
 
     func markEmailVerified(id: UUID) async throws {
         try await pool.withRepo { repo in
-            try await repo.execute(
+            _ = try await repo.execute(
                 "UPDATE accounts SET email_verified = true, updated_at = now() WHERE id = \(id)")
         }
     }
 
     func setPasswordHash(_ hash: String, id: UUID) async throws {
         try await pool.withRepo { repo in
-            try await repo.execute(
+            _ = try await repo.execute(
                 "UPDATE accounts SET password_hash = \(hash), updated_at = now() WHERE id = \(id)")
         }
     }
@@ -116,7 +116,7 @@ struct PostgresAccountTokens: OneTimeTokenStore {
     func put(_ key: String, _ record: Data, ttl: Duration) async throws {
         let expires = Date().addingTimeInterval(Double(ttl.components.seconds))
         try await pool.withRepo { repo in
-            try await repo.execute(
+            _ = try await repo.execute(
                 """
                 INSERT INTO account_tokens (key, record, expires_at) VALUES (\(key), \(record), \(expires))
                 ON CONFLICT (key) DO UPDATE SET record = EXCLUDED.record, expires_at = EXCLUDED.expires_at
