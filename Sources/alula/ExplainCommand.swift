@@ -67,8 +67,11 @@ struct Explain: ParsableCommand {
         let parts = query.uppercased().split(separator: "-")
         guard let wanted = parts.last.flatMap({ Int($0) }) else { return [] }
         let family = parts.dropLast().joined(separator: "-")
-        let candidates = DiagnosticCode.all.filter { family.isEmpty || $0.id.hasPrefix(family + "-") }
-        return candidates
+        let candidates = DiagnosticCode.all.filter {
+            family.isEmpty || $0.id.hasPrefix(family + "-")
+        }
+        return
+            candidates
             .sorted { abs(number($0) - wanted) < abs(number($1) - wanted) }
             .prefix(3).map(\.id).sorted()
     }
@@ -84,7 +87,9 @@ struct Explain: ParsableCommand {
                 family = thisFamily
             }
             let severity = code.severity == .warning ? "warning" : "error  "
-            lines.append("\(code.id.padding(toLength: 16, withPad: " ", startingAt: 0)) \(severity)  \(code.title)")
+            lines.append(
+                "\(code.id.padding(toLength: 16, withPad: " ", startingAt: 0)) \(severity)  \(code.title)"
+            )
         }
         lines.append("")
         lines.append("alula explain <code> prints one.")

@@ -8,9 +8,11 @@ import Testing
 struct ExplainCommandTests {
     /// A code as a reader copies it from build output — bracketed, in any
     /// case, or as the number alone — finds its page.
-    @Test("a code is found however it is copied", arguments: [
-        "ALU-DI-1001", "alu-di-1001", "[ALU-DI-1001]", " ALU-DI-1001 ", "1001",
-    ])
+    @Test(
+        "a code is found however it is copied",
+        arguments: [
+            "ALU-DI-1001", "alu-di-1001", "[ALU-DI-1001]", " ALU-DI-1001 ", "1001",
+        ])
     func lookup(_ query: String) {
         #expect(Explain.lookup(query) == .missingProvider)
     }
@@ -21,7 +23,8 @@ struct ExplainCommandTests {
             let page = try Explain.page(for: code.id)
             #expect(page.hasPrefix("\(code.id): \(code.title)"), "\(code.id)")
             #expect(page.contains("Fixes\n-----"), "\(code.id) has no fixes section")
-            #expect(!page.contains("**") && !page.contains("```"), "\(code.id) kept markdown syntax")
+            #expect(
+                !page.contains("**") && !page.contains("```"), "\(code.id) kept markdown syntax")
             #expect(page.hasSuffix("Online: \(code.documentationURL)"))
         }
     }
@@ -31,7 +34,10 @@ struct ExplainCommandTests {
     @Test("an unknown code suggests its nearest neighbours")
     func unknownCode() {
         #expect(throws: CLIError.self) { try Explain.page(for: "ALU-DI-1004") }
-        #expect(Explain.suggestions(for: "ALU-DI-1004") == ["ALU-DI-1002", "ALU-DI-1003", "ALU-DI-1005"])
+        #expect(
+            Explain.suggestions(for: "ALU-DI-1004") == [
+                "ALU-DI-1002", "ALU-DI-1003", "ALU-DI-1005",
+            ])
         #expect(Explain.suggestions(for: "not-a-code").isEmpty)
     }
 

@@ -6,6 +6,8 @@ struct Alula: AsyncParsableCommand {
         commandName: "alula",
         abstract: "Scaffolding and tooling for Alula applications.",
         version: "0.1.0",
-        subcommands: [New.self, Migrate.self, Routes.self, Dev.self, Run.self, Generate.self, Explain.self]
+        subcommands: [
+            New.self, Migrate.self, Routes.self, Dev.self, Run.self, Generate.self, Explain.self,
+        ]
     )
 }
