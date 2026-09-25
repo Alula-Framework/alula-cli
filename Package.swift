@@ -15,12 +15,20 @@ let package = Package(
         .executable(name: "alula", targets: ["alula"])
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.4.0")
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.4.0"),
+        // For `alula explain`: the diagnostic pages, from the one source of
+        // truth the build's diagnostics link to. No traits, so this resolves
+        // Alula's lean graph and builds only the dependency-free
+        // AlulaDiagnostics.
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.51.0", traits: []),
     ],
     targets: [
         .executableTarget(
             name: "alula",
-            dependencies: [.product(name: "ArgumentParser", package: "swift-argument-parser")]
+            dependencies: [
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "AlulaDiagnostics", package: "alula"),
+            ]
         ),
         .testTarget(name: "alulaTests", dependencies: ["alula"]),
     ]

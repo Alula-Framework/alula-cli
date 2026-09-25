@@ -16,6 +16,7 @@ enum CLIError: Error, CustomStringConvertible {
     case fileExists(String)
     case missingProducts([String])
     case ambiguousTarget([String])
+    case unknownDiagnosticCode(String, suggestions: [String])
 
     var description: String {
         switch self {
@@ -27,6 +28,10 @@ enum CLIError: Error, CustomStringConvertible {
             return "\(path) already exists. Choose another name, or pass --force to write into it."
         case .writeFailed(let path, let underlying):
             return "could not write \(path): \(underlying)"
+        case .unknownDiagnosticCode(let code, let suggestions):
+            return suggestions.isEmpty
+                ? "Alula has no diagnostic code '\(code)'. `alula explain` lists every code."
+                : "Alula has no diagnostic code '\(code)'. Did you mean \(suggestions.joined(separator: ", "))?"
         case .ambiguousTarget(let targets):
             return targets.isEmpty
                 ? "no application target under Sources/. Name one with --target."

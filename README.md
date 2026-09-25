@@ -50,6 +50,7 @@ alula dev                         # build, run, and rebuild + restart on every c
 alula routes                      # every route: method, path, lanes, handler
 alula routes --json
 alula generate controller Orders  # Sources/App/Controllers/OrdersController.swift + a test
+alula explain ALU-DI-1001         # what a build diagnostic's code means, and how to fix it
 ```
 
 `alula dev` restarts the app with SIGTERM, as an orchestrator would, so it
