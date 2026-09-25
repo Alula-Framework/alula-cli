@@ -795,8 +795,8 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.45.0", traits: ["Web"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.15.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.48.3", traits: ["Web"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.18.1", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -1558,8 +1558,8 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.45.0", traits: ["Security"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.15.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.48.3", traits: ["Security"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.18.1", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -1890,7 +1890,6 @@ import AlulaDataCore
 import AlulaDataPostgres
 import AlulaPresence
 import AlulaSecurityCore
-import PostgresNIO
 import Synchronization
 
 // MARK: - Request bodies
@@ -2217,10 +2216,10 @@ extension ChatError {
     /// Repository failures translated at the edge, which is the only layer
     /// that should know about status codes.
     ///
-    /// A duplicate slug arrives as Postgres SQLSTATE 23505 from inside the
+    /// A duplicate slug arrives as a unique violation from inside the
     /// `Multi`'s failed step. That is a conflict the caller can fix, not a
-    /// server fault, so it is a 409 — and reading the SQLSTATE is how you
-    /// tell the two apart without parsing an error message.
+    /// server fault, so it is a 409 — and Hangar's typed `DatabaseError`
+    /// tells the two apart without parsing an error message.
     var asHTTPError: HTTPError {
         switch self {
         case .noSuchRoom(let id):
@@ -2228,9 +2227,7 @@ extension ChatError {
         case .upsertReturnedNothing(let label):
             return HTTPError(.internalServerError, "upsert returned no row for '\(label)'")
         case .multiStepFailed(let step, let underlying):
-            if let psql = underlying as? PSQLError,
-                psql.serverInfo?[.sqlState] == "23505"
-            {
+            if let database = underlying as? DatabaseError, database.isUniqueViolation {
                 return HTTPError(.conflict, "step '\(step)': that value already exists")
             }
             return HTTPError(.internalServerError, "step '\(step)' failed")
@@ -5826,7 +5823,7 @@ let package = Package(
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // core: configuration, composition, and the service lifecycle.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.45.0", traits: ["Web"])
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.48.3", traits: ["Web"])
     ],
     targets: [
         .executableTarget(

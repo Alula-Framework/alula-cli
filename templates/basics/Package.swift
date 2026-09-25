@@ -15,8 +15,8 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.45.0", traits: ["Web"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.15.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.48.3", traits: ["Web"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.18.1", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(

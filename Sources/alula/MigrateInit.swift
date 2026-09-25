@@ -77,7 +77,7 @@ struct MigrateInit {
             manifest.insert(
                 contentsOf: """
                             .package(url: "https://github.com/Alula-Framework/alula-data.git",
-                                     from: "0.15.0", traits: ["Postgres"]),\n
+                                     from: "0.18.1", traits: ["Postgres"]),\n
                     """,
                 at: range.upperBound)
         }
