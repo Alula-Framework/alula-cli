@@ -6,12 +6,12 @@ server:
   port: 8080
 
 # The connection pool. Every request that touches a repository holds one
-# connection for the life of that request, so `pool_size` is a ceiling on
+# connection for the life of that request, so `pool-size` is a ceiling on
 # concurrent database-touching requests, not a suggestion.
 datasource:
   primary:
     url: "postgres://postgres:alula@127.0.0.1:55432/app_dev?sslmode=disable"
-    pool_size: 5
+    pool-size: 5
 
 actuator:
   format: json

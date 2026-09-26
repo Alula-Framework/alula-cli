@@ -76,7 +76,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/Alula-Framework/alula.git",
-                 from: "0.51.0", traits: ["Web"])
+                 from: "0.52.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
@@ -357,10 +357,10 @@ Add to `alula.yaml`:
 datasource:
   primary:
     url: "postgres://postgres:alula@127.0.0.1:55432/app_dev?sslmode=disable"
-    pool_size: 5
+    pool-size: 5
 ```
 
-`pool_size` is a real ceiling, not a hint. Every request that touches a
+`pool-size` is a real ceiling, not a hint. Every request that touches a
 repository holds one connection for that request's whole life, so five is
 five concurrent database-touching requests. Raise it, or shorten your units
 of work — but know which one you are doing.
@@ -373,9 +373,9 @@ Note that `require` does **not** verify certificates; `verify-full` does.
 ```swift
 dependencies: [
     .package(url: "https://github.com/Alula-Framework/alula.git",
-             from: "0.51.0", traits: ["Web"]),
+             from: "0.52.0", traits: ["Web"]),
     .package(url: "https://github.com/Alula-Framework/alula-data.git",
-             from: "0.19.0", traits: ["Postgres"]),
+             from: "0.20.0", traits: ["Postgres"]),
 ],
 ```
 
@@ -1760,7 +1760,7 @@ broadcasts nothing.
 | Build error naming a `@ConfigValue` key | The plugin checks keys without defaults against `alula.yaml` at build time. Add the key, or give it a `default:`. |
 | `migrate` cannot connect | `ALULA_DATABASE_URL` is unset in this shell. The CLI does not read `alula.yaml`. |
 | `checksum mismatch` from migrate | You edited a migration that already ran. Write a new one, or `migrate repair` if the edit was cosmetic. |
-| `poolExhausted` under load | More concurrent operations than the pool has connections, for longer than `checkout_timeout_ms`. Raise `pool_size`, shorten the bracket, or map the error to a 503 with an `ErrorMapper`. |
+| `poolExhausted` under load | More concurrent operations than the pool has connections, for longer than `checkout-timeout-ms`. Raise `pool-size`, shorten the bracket, or map the error to a 503 with an `ErrorMapper`. |
 | A streamed export starves other requests | `repo.stream` borrows a connection for its whole closure, and a slow client sets that length. Page the query, or give exports their own small pool. |
 | A join is rejected with `unauthenticated` | The socket connected without a `?token=`, or the validator rejected it. |
 | `swift run` says there are multiple executables | Name one: `swift run App`, `swift run migrate`. |

@@ -8,7 +8,7 @@ server:
 datasource:
   primary:
     url: "postgres://postgres:alula@127.0.0.1:55432/alula_demo?sslmode=disable"
-    pool_size: 5
+    pool-size: 5
 
 actuator:
   format: ssr

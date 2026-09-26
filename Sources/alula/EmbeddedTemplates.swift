@@ -795,8 +795,8 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.51.0", traits: ["Web"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.19.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.52.0", traits: ["Web"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.20.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -1400,12 +1400,12 @@ server:
   port: 8080
 
 # The connection pool. Every request that touches a repository holds one
-# connection for the life of that request, so `pool_size` is a ceiling on
+# connection for the life of that request, so `pool-size` is a ceiling on
 # concurrent database-touching requests, not a suggestion.
 datasource:
   primary:
     url: "postgres://postgres:alula@127.0.0.1:55432/app_dev?sslmode=disable"
-    pool_size: 5
+    pool-size: 5
 
 actuator:
   format: json
@@ -1558,8 +1558,8 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.51.0", traits: ["Security"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.19.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.52.0", traits: ["Security"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.20.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -5630,7 +5630,7 @@ server:
 datasource:
   primary:
     url: "postgres://postgres:alula@127.0.0.1:55432/alula_demo?sslmode=disable"
-    pool_size: 5
+    pool-size: 5
 
 actuator:
   format: ssr
@@ -5823,7 +5823,7 @@ let package = Package(
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // core: configuration, composition, and the service lifecycle.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.51.0", traits: ["Web"])
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.52.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
