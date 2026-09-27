@@ -23,10 +23,13 @@ struct SocketController {
     ///
     /// The marker acknowledges that this one is provided by a module — the
     /// bring-your-own-auth seam, `DemoAuthModule`'s `tokenValidator` value —
-    /// rather than scanned from an annotation. Without it the build warns,
-    /// correctly: the scanner can't see a module-provided value, so an unmarked
-    /// @Inject of a type it never found as a @Component is usually a missing
-    /// dependency that would fail composition.
+    /// rather than scanned from an annotation. In an application the
+    /// composer already sees module values, and a type nothing provides fails
+    /// the build there (ALU-DI-1001) marker or not; the marker is what says,
+    /// to the scanner and the reader, that no @Component is expected. Were a
+    /// @Component conformer ever added, the marker would also stop the
+    /// generator bridging `any TokenValidator` to it and colliding with the
+    /// module's value.
     // alula:hand-registered
     @Inject var validator: any TokenValidator
 

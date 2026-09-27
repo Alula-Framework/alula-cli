@@ -38,10 +38,14 @@ alula new MyService --tier basics --with postgres,valkey
 `postgres`, `valkey` and `security` are the options, and each maps to a
 package trait — anything not named is never resolved. The tier's defaults
 cover the usual case, and a combination the tier's own code could not compile
-is refused rather than emitted.
+is refused rather than emitted. A trait only makes the dependency build; when
+`--with` names something the tier's code does not use (`valkey` above),
+`alula new` prints the steps left to wire it in.
 
 The templates are embedded in the binary, so a generated project is
 byte-for-byte what CI built and tested — with the target renamed to yours.
+`alula new MyService` writes `Sources/MyService/` and `Tests/MyServiceTests/`,
+and the app runs with `swift run MyService`.
 
 ## Develop
 
@@ -49,9 +53,24 @@ byte-for-byte what CI built and tested — with the target renamed to yours.
 alula dev                         # build, run, and rebuild + restart on every change
 alula routes                      # every route: method, path, lanes, handler
 alula routes --json
-alula generate controller Orders  # Sources/App/Controllers/OrdersController.swift + a test
-alula explain ALU-DI-1001         # what a build diagnostic's code means, and how to fix it
+alula generate controller Orders  # Sources/MyService/Controllers/OrdersController.swift + a test
+alula generate auth               # accounts: registration, email verification, password reset
+alula run commands                # list the app's own commands (declared by modules)
+alula run users                   # run one (the demo's): the app composed, no HTTP server
+alula explain ALU-DI-1001         # what a diagnostic's code means, and how to fix it
+alula explain                     # every code, by family
 ```
+
+`generate` writes into the project's one application target; name it with
+`--target` when `Sources/` holds more than one. `generate auth` needs the
+Security trait and a `migrate` executable, and says which products the
+manifest is missing when it cannot find them.
+
+Alula's build errors and warnings carry a code such as `[ALU-DI-1001]`, and
+so do the failures it reports when an app will not start. `alula explain`
+prints that code's page offline; the number alone
+(`alula explain 1001`) is enough. Hangar (`HGR-…`) and alula-data (`ALD-…`)
+codes point at those packages' pages.
 
 `alula dev` restarts the app with SIGTERM, as an orchestrator would, so it
 drains and shuts down in order. A failed build leaves the previous one
@@ -123,10 +142,15 @@ command and what you should see.
 
 ## Why the templates are nested
 
-`skeleton`'s files are a subset of `basics`', and `basics`' a subset of
-`demo`'s. That is checked in CI, and it is not decoration: it is what lets
-each tutorial stage be a real diff between two working projects rather than
-prose that slowly stops matching the code.
+Each tier carries the one before it forward: nearly every file in `skeleton`
+is also in `basics`, and nearly every file in `basics` is also in `demo`. The
+exceptions are placeholders a later tier fills (`.gitkeep`) and tests the demo
+replaces with its own (`basics`' `HealthControllerTests.swift` and
+`InMemoryUsers.swift`). That is what lets each tutorial stage be a real diff
+between two working projects rather than prose that slowly stops matching the
+code. CI does not check the nesting itself. It checks that every path and
+symbol the tutorial names exists in the templates, and it runs the tutorial's
+checkpoints.
 
 ## Verifying
 

@@ -20,26 +20,25 @@ openapi:
   title: Alula Demo API
   version: 1.0.0
 
-# Channels: the per-socket outbound queue. When it fills, the OLDEST messages
-# are dropped — a client behind on a realtime feed wants current state, not a
-# backlog it can never catch up on. Drops are counted per socket and logged.
-# Note the `alula.` prefix here, absent from `server`/`datasource`/`actuator`
-# above: Channels and Presence namespace their keys, the older packages do not.
-# That inconsistency is real and predates this demo.
-alula:
-  channels:
-    outbound-buffer-size: 256
-    heartbeat-timeout-seconds: 60
+# Channels: the per-socket outbound queue. When a client falls far enough
+# behind to fill it, the default is to close its socket, so the client
+# reconnects, re-joins and gets fresh state instead of a view with silent gaps.
+# `outbound-overflow: drop-oldest` keeps the socket open and drops the OLDEST
+# queued messages instead, for feeds where only the latest value matters.
+# Overflows are counted per socket and logged either way.
+channels:
+  outbound-buffer-size: 256
+  heartbeat-timeout-seconds: 60
 
 # Presence. This demo runs one node, so it starts in single-node mode and
 # these only take effect once a distributed PubSub adapter is present. They
 # are here so the knobs are visible rather than folklore.
-  presence:
-    heartbeat-interval-seconds: 5
-    down-after-seconds: 15
-    permdown-after-seconds: 300
+presence:
+  heartbeat-interval-seconds: 5
+  down-after-seconds: 15
+  permdown-after-seconds: 300
 
-# No `security.oidc.*` block: this demo registers its own TokenValidator
+# No `security.oidc.*` block: this demo provides its own TokenValidator
 # (see DemoTokenValidator.swift) so it runs with no identity provider. A real
 # deployment deletes that file and configures the issuer and audience here,
 # which is all the generic OIDC validator needs:
@@ -48,7 +47,7 @@ alula:
 #   oidc:
 #     issuer: https://your-tenant.example.com/
 #     audience: alula-demo
-#     roles_claim: realm_access.roles
+#     roles-claim: realm_access.roles
 #
 # Browser sign-in is the same story. This demo checks passwords itself
 # (AlulaPasswordSignInModule over DemoAccountsModule); to sign in through

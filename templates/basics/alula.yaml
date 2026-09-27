@@ -5,9 +5,10 @@ server:
   host: 127.0.0.1
   port: 8080
 
-# The connection pool. Every request that touches a repository holds one
-# connection for the life of that request, so `pool-size` is a ceiling on
-# concurrent database-touching requests, not a suggestion.
+# The connection pool. A repository leases a connection for each `withRepo`
+# call and gives it back when the closure returns; nothing holds one for a
+# whole request. `pool-size` is a ceiling on connections in use at once, and a
+# lease beyond it waits for one to come back.
 datasource:
   primary:
     url: "postgres://postgres:alula@127.0.0.1:55432/app_dev?sslmode=disable"

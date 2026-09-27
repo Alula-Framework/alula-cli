@@ -8,7 +8,11 @@ server:
   host: 127.0.0.1
   port: 8080
 
-# Health, info, and metrics. Not registered at all when ALULA_ENV is prod:
-# the routes do not exist rather than existing-but-guarded.
+# Health, info, and metrics. The /actuator dashboard and /actuator/info are
+# registered only when ALULA_ENV names a development environment (dev,
+# development, test, local); everywhere else, including an unset ALULA_ENV,
+# only the /actuator/health routes exist.
+# The routes that are left out do not exist rather than existing-but-guarded.
+# ALULA_ACTUATOR_EXPOSURE (disabled, health_only, full) overrides the choice.
 actuator:
   format: json

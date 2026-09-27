@@ -18,8 +18,8 @@ struct UserController {
 
     /// The seam, not the concrete repository. Exactly one type in this
     /// target conforms to it, so the registration generator synthesizes the
-    /// binding — nothing registers it by hand, and a test can register its
-    /// own fake under the same key.
+    /// binding — nothing registers it by hand, and a test passes its own
+    /// fake to `UserController(users:)`.
     @Inject var users: (any UserRepositoryProtocol)
 
     @GetRoute("/users")

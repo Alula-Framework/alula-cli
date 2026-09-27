@@ -15,9 +15,10 @@ import Foundation
 struct UserRepository: UserRepositoryProtocol {
     /// The pool, registered by `PostgresDataModule<PrimaryDataSource>`.
     ///
-    /// `alula:hand-registered` tells the registration generator that this
-    /// type is registered by a module rather than scanned from this target,
-    /// so it does not warn about a component it cannot see.
+    /// `alula:hand-registered` records that this type comes from a module
+    /// rather than being scanned from this target. The composer sees module
+    /// values, so the build needs no help here; if nothing provided the pool,
+    /// the build would fail with ALU-DI-1001 marker or not.
     // alula:hand-registered — PostgresDataModule registers the pool.
     @Inject var pool: PostgresDataSource
 

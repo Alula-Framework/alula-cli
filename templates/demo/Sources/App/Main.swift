@@ -51,8 +51,8 @@ struct AppModule: AlulaModule {
             // Authentication wiring — the request-scoped principal and the
             // `Authentication` middleware. It registers no validator: how
             // tokens are validated is chosen by listing a module
-            // (`AlulaOIDCModule`) or registering `(any TokenValidator)`
-            // yourself, as this application does below. Order does not
+            // (`AlulaOIDCModule`) or providing `(any TokenValidator)` from
+            // one of your own, as this application does (DemoAuthModule). Order does not
             // matter, which is why this can simply be a dependency.
             AlulaSecurityModule.self,
             // Sessions: a cookie-keyed record per browser, loaded ahead of

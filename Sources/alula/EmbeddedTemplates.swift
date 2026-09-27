@@ -795,8 +795,8 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.52.0", traits: ["Web"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.20.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.57.0", traits: ["Web"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.23.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -890,8 +890,8 @@ struct UserController {
 
     /// The seam, not the concrete repository. Exactly one type in this
     /// target conforms to it, so the registration generator synthesizes the
-    /// binding — nothing registers it by hand, and a test can register its
-    /// own fake under the same key.
+    /// binding — nothing registers it by hand, and a test passes its own
+    /// fake to `UserController(users:)`.
     @Inject var users: (any UserRepositoryProtocol)
 
     @GetRoute("/users")
@@ -1029,9 +1029,10 @@ import Foundation
 struct UserRepository: UserRepositoryProtocol {
     /// The pool, registered by `PostgresDataModule<PrimaryDataSource>`.
     ///
-    /// `alula:hand-registered` tells the registration generator that this
-    /// type is registered by a module rather than scanned from this target,
-    /// so it does not warn about a component it cannot see.
+    /// `alula:hand-registered` records that this type comes from a module
+    /// rather than being scanned from this target. The composer sees module
+    /// values, so the build needs no help here; if nothing provided the pool,
+    /// the build would fail with ALU-DI-1001 marker or not.
     // alula:hand-registered — PostgresDataModule registers the pool.
     @Inject var pool: PostgresDataSource
 
@@ -1399,9 +1400,10 @@ server:
   host: 127.0.0.1
   port: 8080
 
-# The connection pool. Every request that touches a repository holds one
-# connection for the life of that request, so `pool-size` is a ceiling on
-# concurrent database-touching requests, not a suggestion.
+# The connection pool. A repository leases a connection for each `withRepo`
+# call and gives it back when the closure returns; nothing holds one for a
+# whole request. `pool-size` is a ceiling on connections in use at once, and a
+# lease beyond it waits for one to come back.
 datasource:
   primary:
     url: "postgres://postgres:alula@127.0.0.1:55432/app_dev?sslmode=disable"
@@ -1558,8 +1560,8 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.52.0", traits: ["Security"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.20.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.57.0", traits: ["Security"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.23.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
@@ -2412,10 +2414,13 @@ struct SocketController {
     ///
     /// The marker acknowledges that this one is provided by a module — the
     /// bring-your-own-auth seam, `DemoAuthModule`'s `tokenValidator` value —
-    /// rather than scanned from an annotation. Without it the build warns,
-    /// correctly: the scanner can't see a module-provided value, so an unmarked
-    /// @Inject of a type it never found as a @Component is usually a missing
-    /// dependency that would fail composition.
+    /// rather than scanned from an annotation. In an application the
+    /// composer already sees module values, and a type nothing provides fails
+    /// the build there (ALU-DI-1001) marker or not; the marker is what says,
+    /// to the scanner and the reader, that no @Component is expected. Were a
+    /// @Component conformer ever added, the marker would also stop the
+    /// generator bridging `any TokenValidator` to it and colliding with the
+    /// module's value.
     // alula:hand-registered
     @Inject var validator: any TokenValidator
 
@@ -2809,8 +2814,8 @@ struct AppModule: AlulaModule {
             // Authentication wiring — the request-scoped principal and the
             // `Authentication` middleware. It registers no validator: how
             // tokens are validated is chosen by listing a module
-            // (`AlulaOIDCModule`) or registering `(any TokenValidator)`
-            // yourself, as this application does below. Order does not
+            // (`AlulaOIDCModule`) or providing `(any TokenValidator)` from
+            // one of your own, as this application does (DemoAuthModule). Order does not
             // matter, which is why this can simply be a dependency.
             AlulaSecurityModule.self,
             // Sessions: a cookie-keyed record per browser, loaded ahead of
@@ -4619,7 +4624,7 @@ private struct Harness {
     init(store: FakeRoomStore) throws {
         self.store = store
         let configuration = Configuration(values: [
-            "alula.channels.heartbeat-check-interval-seconds": "0.05"
+            "channels.heartbeat-check-interval-seconds": "0.05"
         ])
         // The wiring, written out: PubSub's bus and this module's declared
         // channels are what Channels is built from.
@@ -5642,26 +5647,25 @@ openapi:
   title: Alula Demo API
   version: 1.0.0
 
-# Channels: the per-socket outbound queue. When it fills, the OLDEST messages
-# are dropped — a client behind on a realtime feed wants current state, not a
-# backlog it can never catch up on. Drops are counted per socket and logged.
-# Note the `alula.` prefix here, absent from `server`/`datasource`/`actuator`
-# above: Channels and Presence namespace their keys, the older packages do not.
-# That inconsistency is real and predates this demo.
-alula:
-  channels:
-    outbound-buffer-size: 256
-    heartbeat-timeout-seconds: 60
+# Channels: the per-socket outbound queue. When a client falls far enough
+# behind to fill it, the default is to close its socket, so the client
+# reconnects, re-joins and gets fresh state instead of a view with silent gaps.
+# `outbound-overflow: drop-oldest` keeps the socket open and drops the OLDEST
+# queued messages instead, for feeds where only the latest value matters.
+# Overflows are counted per socket and logged either way.
+channels:
+  outbound-buffer-size: 256
+  heartbeat-timeout-seconds: 60
 
 # Presence. This demo runs one node, so it starts in single-node mode and
 # these only take effect once a distributed PubSub adapter is present. They
 # are here so the knobs are visible rather than folklore.
-  presence:
-    heartbeat-interval-seconds: 5
-    down-after-seconds: 15
-    permdown-after-seconds: 300
+presence:
+  heartbeat-interval-seconds: 5
+  down-after-seconds: 15
+  permdown-after-seconds: 300
 
-# No `security.oidc.*` block: this demo registers its own TokenValidator
+# No `security.oidc.*` block: this demo provides its own TokenValidator
 # (see DemoTokenValidator.swift) so it runs with no identity provider. A real
 # deployment deletes that file and configures the issuer and audience here,
 # which is all the generic OIDC validator needs:
@@ -5670,7 +5674,7 @@ alula:
 #   oidc:
 #     issuer: https://your-tenant.example.com/
 #     audience: alula-demo
-#     roles_claim: realm_access.roles
+#     roles-claim: realm_access.roles
 #
 # Browser sign-in is the same story. This demo checks passwords itself
 # (AlulaPasswordSignInModule over DemoAccountsModule); to sign in through
@@ -5823,7 +5827,7 @@ let package = Package(
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // core: configuration, composition, and the service lifecycle.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.52.0", traits: ["Web"])
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.57.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
@@ -5980,8 +5984,12 @@ server:
   host: 127.0.0.1
   port: 8080
 
-# Health, info, and metrics. Not registered at all when ALULA_ENV is prod:
-# the routes do not exist rather than existing-but-guarded.
+# Health, info, and metrics. The /actuator dashboard and /actuator/info are
+# registered only when ALULA_ENV names a development environment (dev,
+# development, test, local); everywhere else, including an unset ALULA_ENV,
+# only the /actuator/health routes exist.
+# The routes that are left out do not exist rather than existing-but-guarded.
+# ALULA_ACTUATOR_EXPOSURE (disabled, health_only, full) overrides the choice.
 actuator:
   format: json
 

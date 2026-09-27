@@ -52,7 +52,7 @@ private struct Harness {
     init(store: FakeRoomStore) throws {
         self.store = store
         let configuration = Configuration(values: [
-            "alula.channels.heartbeat-check-interval-seconds": "0.05"
+            "channels.heartbeat-check-interval-seconds": "0.05"
         ])
         // The wiring, written out: PubSub's bus and this module's declared
         // channels are what Channels is built from.

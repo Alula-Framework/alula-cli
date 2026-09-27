@@ -13,11 +13,13 @@ starter site offers:
 Every stage ends with a **Checkpoint** — a command and what you should see.
 Don't move on until it passes; every later stage assumes the earlier ones.
 
-The three templates are not three separate samples. Part 1's files are a
-subset of Part 2's, and Part 2's a subset of Part 3's — checked mechanically
-in CI. That is what lets each stage below be a real diff rather than prose
-that drifts from the code. If a stage and its template ever disagree, the
-template is right and the tutorial has a bug.
+The three templates are not three separate samples. Nearly every file in
+Part 1's project is also in Part 2's, and nearly every file in Part 2's is also
+in Part 3's. That is what lets each stage below be a real diff rather than
+prose that drifts from the code. CI checks that every path and symbol this
+tutorial names exists in the templates, and runs every checkpoint against
+them. If a stage and its template ever disagree, the template is right and the
+tutorial has a bug.
 
 ## What you need
 
@@ -58,9 +60,15 @@ than by a scope you cannot.
 
 ## Stage 1.1 — A package
 
-If you have the CLI, `alula new MyService` writes everything in this part for
-you and you can skip to Stage 1.5's checkpoint. Doing it by hand once is worth
+If you have the CLI, `alula new App` writes everything in this part for you
+and you can skip to Stage 1.5's checkpoint. Doing it by hand once is worth
 it — the rest of the tutorial assumes you know what each piece is for.
+
+The name matters: `alula new` names the target, the executable and the test
+target after the project, so `alula new MyService` writes
+`Sources/MyService/`, `Tests/MyServiceTests/` and `@testable import MyService`,
+and runs with `swift run MyService`. This tutorial calls its target `App`
+throughout; with any other name, read yours wherever it says `App`.
 
 Create a directory and a `Package.swift`:
 
@@ -76,7 +84,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/Alula-Framework/alula.git",
-                 from: "0.52.0", traits: ["Web"])
+                 from: "0.57.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
@@ -144,7 +152,9 @@ at runtime** — a configuration value cannot change under a running request,
 which is why `Configuration` is safe to hold anywhere.
 
 `ALULA_SERVER_PORT=9090 swift run App` overrides the port without editing
-the file. The mapping is mechanical: dots become underscores, uppercased.
+the file. The mapping is mechanical: `ALULA_`, then the key uppercased with
+dots and dashes as underscores — `datasource.primary.pool-size` is
+`ALULA_DATASOURCE_PRIMARY_POOL_SIZE`.
 
 ## Stage 1.3 — Bootstrap
 
@@ -253,8 +263,9 @@ kill %1
 That first `curl` is not ceremony. `swift run` builds before it runs, so the
 first time through, an immediate request fires while the compiler is still
 working and gets connection refused. `--retry-connrefused` waits for the
-server to bind and gives up after thirty tries rather than hanging forever —
-a health check that never fails is not a health check.
+server to bind, a second between tries. The 180 tries allow for a first
+build that takes minutes, and the limit means it gives up rather than hanging
+forever — a health check that never fails is not a health check.
 
 Waiting on `/actuator/health` specifically is the reason the actuator
 registers a probe by default even outside development: this is the same thing
@@ -360,10 +371,12 @@ datasource:
     pool-size: 5
 ```
 
-`pool-size` is a real ceiling, not a hint. Every request that touches a
-repository holds one connection for that request's whole life, so five is
-five concurrent database-touching requests. Raise it, or shorten your units
-of work — but know which one you are doing.
+`pool-size` is a real ceiling, not a hint. A repository leases a connection
+for each `withRepo` call and gives it back when the closure returns — nothing
+holds one for a whole request — so five is five `withRepo` bodies running at
+once. A sixth waits for a connection to come back, and fails after
+`checkout-timeout-ms` (five seconds by default). Raise the pool, or shorten
+what runs inside each bracket — but know which one you are doing.
 
 `sslmode=disable` is correct for a local container and wrong everywhere else.
 Note that `require` does **not** verify certificates; `verify-full` does.
@@ -373,9 +386,9 @@ Note that `require` does **not** verify certificates; `verify-full` does.
 ```swift
 dependencies: [
     .package(url: "https://github.com/Alula-Framework/alula.git",
-             from: "0.52.0", traits: ["Web"]),
+             from: "0.57.0", traits: ["Web"]),
     .package(url: "https://github.com/Alula-Framework/alula-data.git",
-             from: "0.20.0", traits: ["Postgres"]),
+             from: "0.23.0", traits: ["Postgres"]),
 ],
 ```
 
@@ -386,7 +399,7 @@ it is never resolved, never fetched, and never appears in your
 `Package.resolved`. Add `"Valkey"` alongside it when you want that adapter
 too.
 
-Traits are opt-in throughout: this project resolves 34 packages, and neither
+Traits are opt-in throughout: this project resolves 35 packages, and neither
 `valkey-swift` nor `jwt-kit` is among them, because nothing asked for them.
 That is also why Alula requires Swift 6.3 — SwiftPM 6.2 could not resolve an
 opt-in trait through a versioned dependency.
@@ -966,10 +979,15 @@ The shapes worth noticing, because Part 3 leans on all of them:
 
 ## Stage 3.2 — Authentication, brought rather than built
 
-Alula Security Core is a **resource server**. It validates tokens somebody
-else issued. There is no login form, no session table, and no password
-hashing anywhere in it — that is deliberate, and it is the single most
-important thing to understand about this layer.
+For a person's bearer token, Alula Security Core is a **resource server**. It
+validates access tokens an identity provider issued and never mints its own —
+that is deliberate, and it is the single most important thing to understand
+about this layer. The other paths sit beside that one rather than replacing
+it: API keys for automation, checked as a separate token strategy, and, for
+browsers, a session cookie signed in either through an OpenID Connect
+provider or against your own accounts with the password hashing Alula ships.
+[Signing in with the cookie](#signing-in-with-the-cookie) covers the browser
+path.
 
 The seam is one protocol:
 
@@ -1004,12 +1022,16 @@ struct DemoAuthModule: AlulaModule {
 }
 ```
 
-`AlulaSecurityModule` takes one — `init(validator:)` — and the composer
-matches that property to that parameter **by type**. So there is no ordering to
-get right and no "first registration wins" to reason about: a validator is
-either provided or the build says that nothing provides one. Listing
-`AlulaOIDCModule` instead is the same mechanism with `security.oidc.*` behind
-it, which is what a real deployment does.
+`AlulaSecurityModule` takes one — the `validator:` parameter of its
+initializer — and the composer matches that property to that parameter **by
+type**. So there is no ordering to get right and no "first registration wins"
+to reason about: exactly one module provides the validator, and two would be
+refused at build time. The parameter is optional, because an application that
+signs browsers in with a session cookie may accept no bearer tokens at all; one
+with neither a validator nor sessions stops at startup, since nothing could
+ever be authenticated. Listing `AlulaOIDCModule` instead of `DemoAuthModule` is
+the same mechanism with `security.oidc.*` behind it, which is what a real
+deployment does.
 
 It is its own module rather than a property on `AppModule`, and the reason is
 worth a sentence: `SocketController` injects the validator, which makes it a
@@ -1266,7 +1288,7 @@ Create `Sources/App/Jobs/ChatJobs.swift`:
 ```swift
 @Scheduler
 struct ChatJobs {
-    @Inject var digests: RoomDigestService
+    @Inject var digests: (any DigestReading)
 
     @Scheduled("0 0 3 * * *", timeZone: "UTC")
     func nightlySummary() async throws {
@@ -1332,8 +1354,13 @@ test above two lines.
 Change the hour to `25` and rebuild:
 
 ```
-error: hour: 25 is out of range 0–23. In "0 0 25 * * *".
+error: [ALU-SCHED-9001] hour: 25 is out of range 0–23. In "0 0 25 * * *". Fields are: second minute hour day-of-month month day-of-week (a five-field expression is also accepted and means second zero).
+note: see https://github.com/Alula-Framework/alula/blob/main/Diagnostics/ALU-SCHED-9001.md
 ```
+
+Every error and warning Alula reports at build time carries a code like that, and
+`alula explain ALU-SCHED-9001` prints its page — what it means and how to fix
+it — without a network.
 
 Not a job that silently never fires. The macro validates with the *same
 parser the scheduler runs* — the cron engine is a separate, dependency-free
@@ -1633,11 +1660,22 @@ static var dependencies: [any AlulaModule.Type] {
         AlulaSecurityModule.self,
         AlulaSessionsModule.self,
         AlulaRateLimitModule.self,
+        AlulaQueuePostgresModule.self,
+        AlulaQueueWorkerModule.self,
+        AlulaMailModule.self,
+        AlulaOpenAPIModule.self,
     ]
 }
 ```
 
-That last one comes with a decision the framework refuses to make for you.
+The last four are background jobs kept in Postgres (the `alula_jobs` table
+from the `CreateJobs` migration), the worker that runs them, email sent
+through them (`UserService` queues a welcome message on sign-up; in
+development mail is logged rather than sent), and `GET /openapi.json`, which
+the build writes from the controllers and which is served only in dev and test
+unless `openapi.enabled: true`.
+
+`AlulaRateLimitModule` comes with a decision the framework refuses to make for you.
 `AppModule` puts a `RateLimiting` in the default lane, and its key closure
 is required:
 
@@ -1680,6 +1718,8 @@ each of them in dependency order:
 modules: [
     AlulaWebModule<AlulaTransport>.self,
     DemoAuthModule.self,
+    AlulaPasswordSignInModule.self,
+    DemoAccountsModule.self,
     DemoChannelsModule.self,
     AppModule.self,
     ActuatorModule.self,
@@ -1725,7 +1765,7 @@ presence.
 ### Checkpoint
 
 ```bash
-swift test        # 36 tests, no database and no network required
+swift test        # 51 tests, no database and no network required
 ```
 
 That suite runs the real Channels router, the real PubSub fan-out, and the
@@ -1754,6 +1794,7 @@ broadcasts nothing.
 
 | Symptom | Cause / fix |
 |---|---|
+| An error or warning carries a code like `[ALU-DI-1001]` | `alula explain ALU-DI-1001` prints what it means and how to fix it, offline; the `see …` note under it links the same page. |
 | Build asks you to trust a plugin | Expected on a first build: the registration and migrate plugins are SwiftPM build plugins. Approve them. |
 | Bootstrap fails naming `datasource.primary.url` | `alula.yaml` missing or mistyped, or you are not running from the project directory. |
 | Bootstrap fails dialing the pool | Postgres container not running, or wrong port/password. |
