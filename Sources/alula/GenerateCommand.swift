@@ -15,8 +15,11 @@ struct GenerateController: ParsableCommand {
         abstract: "A @Controller with list and show routes, and a test for it.",
         discussion: """
               alula generate controller Orders
-                Sources/App/Controllers/OrdersController.swift   @Controller("/orders")
-                Tests/AppTests/OrdersControllerTests.swift        through TestClient
+                Sources/<App>/Controllers/OrdersController.swift   @Controller("/orders")
+                Tests/<App>Tests/OrdersControllerTests.swift        through TestClient
+
+            <App> is the project's executable target — the name given to \
+            alula new, or --target when there is more than one.
 
             The name may be given as Orders, orders, OrderItems or order-items. \
             Nothing is overwritten.

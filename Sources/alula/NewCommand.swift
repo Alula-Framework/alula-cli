@@ -14,8 +14,10 @@ struct New: AsyncParsableCommand {
               basics     + entities, migrations, a repository, CRUD over Postgres
               demo       + PubSub, Channels, Presence, caching, authentication
 
-            Start from skeleton unless you know you want the others; every tier's \
-            files are a subset of the next one's, so moving up later is additive.
+            Start from skeleton unless you know you want the others. Each tier \
+            builds on the one before it, but they are separate starting points, \
+            not layers: moving up later means adding the next tier's pieces by \
+            hand, and `alula generate` covers the common ones.
             """
     )
 

@@ -68,6 +68,15 @@ struct ProjectName {
         if path == "alula.yaml" {
             out = out.replacingOccurrences(of: "  name: App\n", with: "  name: \(value)\n")
         }
+        // The Dockerfile names the executable in shell and in the exec-form
+        // ENTRYPOINT, neither of them a quoted "App". Missing these produced
+        // an image that copied no binary and could not start for any project
+        // not named App.
+        if path == "Dockerfile" {
+            out = out
+                .replacingOccurrences(of: "for product in App migrate;", with: "for product in \(value) migrate;")
+                .replacingOccurrences(of: #"ENTRYPOINT ["./App"]"#, with: #"ENTRYPOINT ["./\#(value)"]"#)
+        }
         return out
     }
 }

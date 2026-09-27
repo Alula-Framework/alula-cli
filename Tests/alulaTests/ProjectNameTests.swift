@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import alula
@@ -45,6 +46,32 @@ struct ProjectNameTests {
             p.contents(#"name: "AppTests""#, path: "Package.swift") == #"name: "MyServiceTests""#)
         #expect(
             p.contents("@testable import App", path: "T.swift") == "@testable import MyService")
+    }
+
+    @Test("the Dockerfile builds and runs the renamed executable")
+    func dockerfile() throws {
+        let p = try ProjectName("MyService")
+        let dockerfile = """
+             && for product in App migrate; do \\
+            ENTRYPOINT ["./App"]
+            """
+        let out = p.contents(dockerfile, path: "Dockerfile")
+        #expect(out.contains("for product in MyService migrate;"))
+        #expect(out.contains(#"ENTRYPOINT ["./MyService"]"#))
+        #expect(!out.contains("App"))
+    }
+
+    @Test("every template's Dockerfile has the lines the rename rewrites")
+    func templateDockerfiles() throws {
+        let p = try ProjectName("MyService")
+        for tier in ["skeleton", "basics", "demo"] {
+            let url = URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("templates/\(tier)/Dockerfile")
+            let out = p.contents(try String(contentsOf: url, encoding: .utf8), path: "Dockerfile")
+            #expect(out.contains(#"ENTRYPOINT ["./MyService"]"#), "\(tier)")
+            #expect(out.contains("for product in MyService migrate;"), "\(tier)")
+        }
     }
 
     @Test("prose is left alone")
