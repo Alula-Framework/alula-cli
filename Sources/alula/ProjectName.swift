@@ -73,9 +73,13 @@ struct ProjectName {
         // an image that copied no binary and could not start for any project
         // not named App.
         if path == "Dockerfile" {
-            out = out
-                .replacingOccurrences(of: "for product in App migrate;", with: "for product in \(value) migrate;")
-                .replacingOccurrences(of: #"ENTRYPOINT ["./App"]"#, with: #"ENTRYPOINT ["./\#(value)"]"#)
+            out =
+                out
+                .replacingOccurrences(
+                    of: "for product in App migrate;", with: "for product in \(value) migrate;"
+                )
+                .replacingOccurrences(
+                    of: #"ENTRYPOINT ["./App"]"#, with: #"ENTRYPOINT ["./\#(value)"]"#)
         }
         return out
     }
