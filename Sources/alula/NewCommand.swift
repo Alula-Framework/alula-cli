@@ -106,7 +106,10 @@ struct New: AsyncParsableCommand {
             print("  ALULA_DATABASE_URL=postgres://postgres:alula@127.0.0.1:55432/app_dev \\")
             print("             swift run migrate apply")
         }
-        print("  swift run \(project.value)")
+        // Development, declared: since alula 0.60.0 an unset ALULA_ENV is not
+        // development, and the demo — no mail transport — refuses to start
+        // (ALU-CONFIG-5013). `alula dev` sets ALULA_ENV=dev.
+        print("  alula dev        # or: ALULA_ENV=dev swift run \(project.value)")
         let remaining = Capability.remainingSteps(tier: tier, requested: requested)
         if !remaining.isEmpty {
             print("")

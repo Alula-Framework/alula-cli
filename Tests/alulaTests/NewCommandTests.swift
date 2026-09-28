@@ -36,6 +36,24 @@ struct NextStepsTests {
         }
     }
 
+    /// A bare `swift run <Name>` declares no environment, and since alula
+    /// 0.60.0 the demo tier refuses to start that way (ALU-CONFIG-5013): it
+    /// has no mail transport, and logging mail needs development declared.
+    @Test("the run step declares the development environment")
+    func runStepDeclaresDevelopment() throws {
+        let source = try String(
+            contentsOf: Self.packageRoot().appendingPathComponent(
+                "Sources/alula/NewCommand.swift"), encoding: .utf8)
+        let runLines = source.split(separator: "\n").filter {
+            $0.contains("print(") && $0.contains("swift run \\(project.value)")
+        }
+        #expect(runLines.count == 1, "no run step found — did the output change?")
+        for line in runLines {
+            #expect(line.contains("alula dev"))
+            #expect(line.contains("ALULA_ENV=dev swift run"))
+        }
+    }
+
     private static func packageRoot() -> URL {
         var root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         while !FileManager.default.fileExists(

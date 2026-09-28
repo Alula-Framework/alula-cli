@@ -45,7 +45,10 @@ is refused rather than emitted. A trait only makes the dependency build; when
 The templates are embedded in the binary, so a generated project is
 byte-for-byte what CI built and tested — with the target renamed to yours.
 `alula new MyService` writes `Sources/MyService/` and `Tests/MyServiceTests/`,
-and the app runs with `swift run MyService`.
+and the app runs with `alula dev`, or `ALULA_ENV=dev swift run MyService`:
+since alula 0.60.0 the development-only surfaces (logged mail, the OpenAPI
+document, the actuator dashboard) need the environment declared, and the demo
+refuses to start without it (ALU-CONFIG-5013).
 
 ## Develop
 
