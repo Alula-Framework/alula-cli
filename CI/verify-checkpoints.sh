@@ -73,6 +73,13 @@ for line in lines:
 print(n)
 PY
 
+# The tutorial's checkpoints run the app as local development, and say so
+# with `ALULA_ENV=dev`. Exported here as well, only when unset, so a
+# checkpoint that forgets it still runs the way `alula dev` would: since
+# alula 0.60.0 an undeclared environment is not development, and the demo,
+# which has no mail transport, refuses to start (ALU-CONFIG-5013).
+export ALULA_ENV="${ALULA_ENV:-dev}"
+
 total=0; failed=0; skipped=0
 # An optional filter, because a full pass generates and builds a project per
 # checkpoint and takes minutes:  ./CI/verify-checkpoints.sh cp05

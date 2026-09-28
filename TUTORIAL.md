@@ -219,11 +219,19 @@ because most of that graph is checked when the plugin generates it.
 ### Checkpoint
 
 ```bash
-swift run App        # serves until you press Ctrl-C
+ALULA_ENV=dev swift run App        # serves until you press Ctrl-C
 ```
 
 Starts and logs its bound address. `curl localhost:8080/actuator/health`
 returns JSON. Every route 404s, because you have not written one. Ctrl-C.
+
+**`ALULA_ENV=dev` says this is development.** Alula does not assume it: the
+surfaces meant only for a developer's machine — the OpenAPI document, the
+actuator dashboard, and, from Part 3, mail that is logged rather than sent —
+need the environment *declared*, so a production box that forgot the
+variable does not publish them. Without it the skeleton still runs; the
+demo refuses to start with ALU-CONFIG-5013, because it would otherwise log
+every email it sends. `alula dev` sets it for you.
 
 ## Stage 1.4 — A route
 
@@ -254,7 +262,7 @@ reading `Configuration` directly.
 ### Checkpoint
 
 ```bash
-swift run App &
+ALULA_ENV=dev swift run App &
 curl -sf --retry 180 --retry-connrefused --retry-delay 1 localhost:8080/actuator/health
 curl localhost:8080/          # → App is flying
 curl localhost:8080/actuator/health
@@ -711,7 +719,7 @@ The full file, including `CreateUserRequest`, is in
 ### Checkpoint
 
 ```bash
-swift run App &
+ALULA_ENV=dev swift run App &
 curl -sf --retry 180 --retry-connrefused --retry-delay 1 localhost:8080/actuator/health
 curl -XPOST localhost:8080/users -H 'content-type: application/json' \
      -d '{"name":"Ada","email":"ada@example.com"}'          # → 201
@@ -1453,7 +1461,7 @@ it.
 ### Checkpoint
 
 ```bash
-swift run App &
+ALULA_ENV=dev swift run App &
 curl -sf --retry 180 --retry-connrefused --retry-delay 1 localhost:8080/actuator/health
 # the startup log names the scheduler's mode and job count
 kill %1
@@ -1741,7 +1749,7 @@ everything the protocol asks for.
 ### Checkpoint
 
 ```bash
-swift run App &
+ALULA_ENV=dev swift run App &
 curl -sf --retry 180 --retry-connrefused --retry-delay 1 localhost:8080/actuator/health
 
 TOKEN=demo:ada:moderator
@@ -1804,4 +1812,5 @@ broadcasts nothing.
 | A streamed export starves other requests | `repo.stream` borrows a connection for its whole closure, and a slow client sets that length. Page the query, or give exports their own small pool. |
 | A join is rejected with `unauthenticated` | The socket connected without a `?token=`, or the validator rejected it. |
 | `swift run` says there are multiple executables | Name one: `swift run App`, `swift run migrate`. |
-| Port already bound | `ALULA_SERVER_PORT=9090 swift run App`. |
+| Port already bound | `ALULA_SERVER_PORT=9090 ALULA_ENV=dev swift run App`. |
+| Startup fails with `[ALU-CONFIG-5013] no mail transport, and no environment was declared` | `ALULA_ENV` is unset. Locally, run with `ALULA_ENV=dev` (`alula dev` sets it); in production, configure a mail transport. |
