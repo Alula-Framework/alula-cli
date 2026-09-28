@@ -1580,7 +1580,6 @@ let package = Package(
                 .product(name: "AlulaPubSub", package: "alula"),
                 .product(name: "AlulaRateLimit", package: "alula"),
                 .product(name: "AlulaChannels", package: "alula"),
-                .product(name: "AlulaChannelsProtocol", package: "alula"),
                 .product(name: "AlulaPresence", package: "alula"),
                 .product(name: "AlulaDataPostgres", package: "alula-data"),
                 .product(name: "AlulaMigrate", package: "alula-data"),
@@ -1638,7 +1637,6 @@ let package = Package(
 """#,
             "Sources/App/Channels/RoomChannel.swift": #"""
 import AlulaChannels
-import AlulaChannelsProtocol
 import AlulaCore
 import AlulaPresence
 import AlulaWeb
@@ -1885,7 +1883,6 @@ struct AttachmentController {
             "Sources/App/Controllers/ChatController.swift": #"""
 import Foundation
 import AlulaChannels
-import AlulaChannelsProtocol
 import AlulaCore
 import AlulaWeb
 import AlulaDataCore
@@ -2836,8 +2833,9 @@ struct AppModule: AlulaModule {
             AlulaQueueWorkerModule.self,
             AlulaMailModule.self,
             // GET /openapi.json: every route and payload type, written by the
-            // build from the controllers below. Served in dev and test only
-            // unless `openapi.enabled: true`.
+            // build from the controllers below. Served only when ALULA_ENV
+            // declares dev or test (`alula dev` sets it), unless
+            // `openapi.enabled: true`.
             AlulaOpenAPIModule.self,
         ]
     }
@@ -4252,6 +4250,9 @@ struct BootstrapTests {
         let configuration = Configuration(values: [
             "app.name": "App",
             "datasource.primary.url": "postgres://localhost/unused",
+            // No SMTP server in a test, and no declared environment in a
+            // hand-built configuration: log mail on purpose.
+            "mail.transport": "log",
         ])
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
         let auth = DemoAuthModule()
@@ -4292,7 +4293,7 @@ struct BootstrapTests {
                     configuration: configuration,
                     store: DemoAccountsModule(configuration: configuration).credentialStore,
                     limiter: RateLimiter(store: InMemoryRateLimitStore())),
-                ActuatorModule(),
+                try ActuatorModule(configuration: configuration),
                 presenceModule,
                 try AlulaCacheModule(configuration: configuration),
             ])
@@ -4572,7 +4573,6 @@ struct RateLimitingTests {
             "Tests/AppTests/RealtimeTests.swift": #"""
 import AlulaChannels
 import AlulaChannelsClient
-import AlulaChannelsProtocol
 import AlulaChannelsTesting
 import AlulaCore
 import AlulaPresence
@@ -4924,7 +4924,7 @@ private func eventually(
 
 """#,
             "Tests/AppTests/RoomChannelTests.swift": #"""
-import AlulaChannelsProtocol
+import AlulaChannels
 import Foundation
 import Testing
 

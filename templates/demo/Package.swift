@@ -36,7 +36,6 @@ let package = Package(
                 .product(name: "AlulaPubSub", package: "alula"),
                 .product(name: "AlulaRateLimit", package: "alula"),
                 .product(name: "AlulaChannels", package: "alula"),
-                .product(name: "AlulaChannelsProtocol", package: "alula"),
                 .product(name: "AlulaPresence", package: "alula"),
                 .product(name: "AlulaDataPostgres", package: "alula-data"),
                 .product(name: "AlulaMigrate", package: "alula-data"),

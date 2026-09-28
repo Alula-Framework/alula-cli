@@ -139,3 +139,17 @@ struct GenerateAuthTests {
         #expect(GenerateAuth.timestamp(Date(timeIntervalSince1970: 0)) == "19700101000000")
     }
 }
+
+@Suite("alula dev environment")
+struct DevEnvironmentTests {
+    @Test("an unset ALULA_ENV becomes dev, so the app's developer surfaces are on")
+    func defaultsToDev() {
+        #expect(AppRunner.developmentEnvironment(["PATH": "/bin"])["ALULA_ENV"] == "dev")
+        #expect(AppRunner.developmentEnvironment(["ALULA_ENV": ""])["ALULA_ENV"] == "dev")
+    }
+
+    @Test("an ALULA_ENV the developer set is kept")
+    func keepsExplicit() {
+        #expect(AppRunner.developmentEnvironment(["ALULA_ENV": "test"])["ALULA_ENV"] == "test")
+    }
+}

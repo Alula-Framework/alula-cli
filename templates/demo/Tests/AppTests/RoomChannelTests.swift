@@ -1,4 +1,4 @@
-import AlulaChannelsProtocol
+import AlulaChannels
 import Foundation
 import Testing
 

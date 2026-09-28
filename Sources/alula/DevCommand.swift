@@ -147,6 +147,20 @@ final class AppRunner: @unchecked Sendable {
     private let lock = NSLock()
     private var process: Process?
 
+    /// The app's environment under `alula dev`: the caller's, with
+    /// `ALULA_ENV=dev` added when it is not already set. Alula publishes its
+    /// developer surfaces (the OpenAPI document, the actuator dashboard, mail
+    /// logged instead of sent) only in an environment that was *declared* a
+    /// development one, so an unset variable would leave `alula dev` running
+    /// like production.
+    static func developmentEnvironment(_ environment: [String: String]) -> [String: String] {
+        var environment = environment
+        if environment["ALULA_ENV", default: ""].isEmpty {
+            environment["ALULA_ENV"] = "dev"
+        }
+        return environment
+    }
+
     init(executable: URL, arguments: [String]) {
         self.executable = executable
         self.arguments = arguments
@@ -156,6 +170,7 @@ final class AppRunner: @unchecked Sendable {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
+        process.environment = Self.developmentEnvironment(ProcessInfo.processInfo.environment)
         do {
             try process.run()
             lock.withLock { self.process = process }

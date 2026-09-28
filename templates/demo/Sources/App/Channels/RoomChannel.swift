@@ -1,5 +1,4 @@
 import AlulaChannels
-import AlulaChannelsProtocol
 import AlulaCore
 import AlulaPresence
 import AlulaWeb

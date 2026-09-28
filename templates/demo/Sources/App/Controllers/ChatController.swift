@@ -1,6 +1,5 @@
 import Foundation
 import AlulaChannels
-import AlulaChannelsProtocol
 import AlulaCore
 import AlulaWeb
 import AlulaDataCore

@@ -73,8 +73,9 @@ struct AppModule: AlulaModule {
             AlulaQueueWorkerModule.self,
             AlulaMailModule.self,
             // GET /openapi.json: every route and payload type, written by the
-            // build from the controllers below. Served in dev and test only
-            // unless `openapi.enabled: true`.
+            // build from the controllers below. Served only when ALULA_ENV
+            // declares dev or test (`alula dev` sets it), unless
+            // `openapi.enabled: true`.
             AlulaOpenAPIModule.self,
         ]
     }

@@ -1,6 +1,5 @@
 import AlulaChannels
 import AlulaChannelsClient
-import AlulaChannelsProtocol
 import AlulaChannelsTesting
 import AlulaCore
 import AlulaPresence

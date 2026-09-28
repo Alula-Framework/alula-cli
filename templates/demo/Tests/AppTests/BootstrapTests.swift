@@ -33,6 +33,9 @@ struct BootstrapTests {
         let configuration = Configuration(values: [
             "app.name": "App",
             "datasource.primary.url": "postgres://localhost/unused",
+            // No SMTP server in a test, and no declared environment in a
+            // hand-built configuration: log mail on purpose.
+            "mail.transport": "log",
         ])
         let postgres = try PostgresDataModule<PrimaryDataSource>(configuration: configuration)
         let auth = DemoAuthModule()
@@ -73,7 +76,7 @@ struct BootstrapTests {
                     configuration: configuration,
                     store: DemoAccountsModule(configuration: configuration).credentialStore,
                     limiter: RateLimiter(store: InMemoryRateLimitStore())),
-                ActuatorModule(),
+                try ActuatorModule(configuration: configuration),
                 presenceModule,
                 try AlulaCacheModule(configuration: configuration),
             ])
