@@ -125,7 +125,9 @@ struct Explain: ParsableCommand {
                 output.append(String(repeating: "-", count: text.count))
                 continue
             }
-            if text.hasPrefix("```") { continue }
+            // A fence can be indented, as one inside a list item is
+            // (ALU-CONFIG-5014's fixes); the code under it keeps its indent.
+            if text.drop(while: { $0 == " " }).hasPrefix("```") { continue }
             output.append(text.replacingOccurrences(of: "**", with: ""))
         }
         return output.joined(separator: "\n")

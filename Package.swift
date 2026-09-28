@@ -20,7 +20,7 @@ let package = Package(
         // truth the build's diagnostics link to. No traits, so this resolves
         // Alula's lean graph and builds only the dependency-free
         // AlulaDiagnostics.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.51.0", traits: []),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.60.0", traits: []),
     ],
     targets: [
         .executableTarget(

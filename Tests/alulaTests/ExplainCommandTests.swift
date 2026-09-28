@@ -29,6 +29,23 @@ struct ExplainCommandTests {
         }
     }
 
+    /// Added in alula 0.60.0, which refuses an old configuration-key spelling
+    /// at start-up: the page a reader is sent to by that refusal must exist
+    /// in the catalog this CLI is built against.
+    @Test("the renamed-key refusal from alula 0.60.0 has a page")
+    func renamedConfigurationKey() throws {
+        let page = try Explain.page(for: "ALU-CONFIG-5014")
+        #expect(
+            page.hasPrefix(
+                "ALU-CONFIG-5014: A configuration key under a spelling Alula no longer reads"))
+    }
+
+    @Test("a fence indented under a list item is dropped like any other")
+    func indentedFence() {
+        let text = Explain.terminal("1. Rename it:\n\n   ```yaml\n   a: 1\n   ```\n")
+        #expect(text == "1. Rename it:\n\n   a: 1\n")
+    }
+
     /// ALU-DI-1004 is deliberately unassigned; asking for it should land
     /// the reader on its neighbours rather than on a dead end.
     @Test("an unknown code suggests its nearest neighbours")
