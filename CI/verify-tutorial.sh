@@ -127,9 +127,15 @@ echo "── removed APIs"
 #
 # A spelling the framework has deleted is a tutorial that will not compile,
 # whatever else passes. Add to this list whenever something is removed.
-removed_grep='TestContainer|container\.register\(|container\.resolve\(|container\.pipeline\(|container\.assets\(|container\.uploads\(|container\.registerChannel|alulaRegisterAll|@Inject\("|@Component\(scope:|@Service\(scope:|@Repository\(scope:|@Component\(qualifier:|Lifetime\.'
-if hits=$(grep -nE "$removed_grep" TUTORIAL.md); then
-  echo "  ✘ tutorial teaches APIs that no longer exist:"
+#
+# 0.60.0 removed `@Component` (use `@Service`), `ActuatorModule()`, the
+# `AlulaChannelsProtocol` product, and the `alula:module-registered` and
+# `alula:undocumented-response` directives; `alula:hand-registered` is now an
+# ordinary comment that says nothing. The templates are searched too: they
+# are what the tutorial is checked against, and what `alula new` copies.
+removed_grep='TestContainer|container\.register\(|container\.resolve\(|container\.pipeline\(|container\.assets\(|container\.uploads\(|container\.registerChannel|alulaRegisterAll|@Inject\("|@Component([^A-Za-z0-9_]|$)|@Service\(scope:|@Repository\(scope:|Lifetime\.|alula:hand-registered|alula:module-registered|alula:undocumented-response|"AlulaChannelsProtocol"|ActuatorModule\(\)'
+if hits=$(grep -rnE --exclude-dir=.build --exclude-dir=.swiftpm "$removed_grep" TUTORIAL.md templates); then
+  echo "  ✘ tutorial or templates use APIs that no longer exist:"
   echo "$hits" | sed 's/^/      /'
   status=1
 else

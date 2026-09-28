@@ -16,16 +16,14 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.57.0", traits: ["Security"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.23.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.60.0", traits: ["Security"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.24.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
             name: "App",
             dependencies: [
-                .product(name: "AlulaCore", package: "alula"),
                 .product(name: "AlulaWeb", package: "alula"),
-                .product(name: "AlulaTransport", package: "alula"),
                 .product(name: "AlulaActuator", package: "alula"),
                 .product(name: "AlulaScheduler", package: "alula"),
                 .product(name: "AlulaQueue", package: "alula"),
@@ -68,21 +66,16 @@ let package = Package(
             name: "AppTests",
             dependencies: [
                 "App",
-                .product(name: "AlulaCore", package: "alula"),
                 .product(name: "AlulaWeb", package: "alula"),
-                .product(name: "AlulaWebTesting", package: "alula"),
-                .product(name: "AlulaSessionsTesting", package: "alula"),
-                .product(name: "AlulaRateLimitTesting", package: "alula"),
+                // Every testing module — Web, Sessions, RateLimit, Queue,
+                // Mail, Channels, PubSub — behind one `import AlulaTesting`.
+                .product(name: "AlulaTesting", package: "alula"),
                 .product(name: "AlulaQueue", package: "alula"),
-                .product(name: "AlulaQueueTesting", package: "alula"),
                 .product(name: "AlulaMail", package: "alula"),
-                .product(name: "AlulaMailTesting", package: "alula"),
                 .product(name: "AlulaChannels", package: "alula"),
-                .product(name: "AlulaChannelsTesting", package: "alula"),
                 .product(name: "AlulaChannelsClient", package: "alula"),
                 .product(name: "AlulaPresence", package: "alula"),
                 .product(name: "AlulaPresenceClient", package: "alula"),
-                .product(name: "AlulaPubSubTesting", package: "alula"),
                 .product(name: "AlulaDataPostgres", package: "alula-data"),
                 .product(name: "AlulaCache", package: "alula-data"),
             ]

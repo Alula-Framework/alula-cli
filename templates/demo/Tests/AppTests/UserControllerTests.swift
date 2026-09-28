@@ -1,8 +1,7 @@
 import AlulaCore
 import AlulaMail
-import AlulaQueueTesting
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import Foundation
 import Testing
 @testable import App

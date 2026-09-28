@@ -38,9 +38,9 @@ import AlulaWeb
 ///          -H 'Cookie: session=…' -H 'X-CSRF-Token: …'       # the same token, still
 @Controller("/session")
 struct SessionController {
-    /// Whichever sign-in module is listed provides it.
-    // alula:hand-registered — a value AlulaPasswordSignInModule (or
-    // AlulaOIDCSignInModule) holds, not a scanned component.
+    /// Whichever sign-in module is listed provides it: a value
+    /// AlulaPasswordSignInModule (or AlulaOIDCSignInModule) holds, not a
+    /// scanned component.
     @Inject var provider: any SignInProvider
 
     /// What `GET /csrf` answers: the token a browser sends back on

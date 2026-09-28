@@ -21,23 +21,17 @@ struct SocketController {
     /// rather than pulled from the context, so the dependency is visible in the
     /// type rather than discovered when the closure runs.
     ///
-    /// The marker acknowledges that this one is provided by a module — the
-    /// bring-your-own-auth seam, `DemoAuthModule`'s `tokenValidator` value —
-    /// rather than scanned from an annotation. In an application the
-    /// composer already sees module values, and a type nothing provides fails
-    /// the build there (ALU-DI-1001) marker or not; the marker is what says,
-    /// to the scanner and the reader, that no @Component is expected. Were a
-    /// @Component conformer ever added, the marker would also stop the
-    /// generator bridging `any TokenValidator` to it and colliding with the
-    /// module's value.
-    // alula:hand-registered
+    /// It comes from a module — the bring-your-own-auth seam,
+    /// `DemoAuthModule`'s `tokenValidator` value — rather than from an
+    /// annotation. The build sees module values, so nothing marks it; a type
+    /// nothing provides fails the build (ALU-DI-1001), and a scanned conformer
+    /// added later would not displace the module's value.
     @Inject var validator: any TokenValidator
 
     /// The channels stack, injected as one value. It used to be built with
     /// `ChannelSocketHandler(context:)`, which resolved the router, the bus
     /// and the channels configuration out of every upgrade request — three
     /// lookups of things the composition root wired at start-up.
-    // alula:hand-registered
     @Inject var sockets: ChannelSockets
 
     /// The upgrade request is where identity is established — before the

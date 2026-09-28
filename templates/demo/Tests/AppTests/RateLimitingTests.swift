@@ -1,9 +1,8 @@
 import AlulaCore
 import AlulaRateLimit
-import AlulaRateLimitTesting
 import AlulaSecurityCore
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import HTTPTypes
 import Testing
 

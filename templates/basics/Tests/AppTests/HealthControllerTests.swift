@@ -1,7 +1,7 @@
 import AlulaCore
 import AlulaDataPostgres
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import Testing
 
 @testable import App

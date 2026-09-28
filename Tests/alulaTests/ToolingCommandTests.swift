@@ -68,6 +68,18 @@ struct ControllerNamesTests {
         #expect(source.contains(#"@GetRoute("/")"#))
         #expect(!source.contains(#"@GetRoute("")"#))
     }
+
+    @Test("the generated test imports AlulaTesting when the manifest names it")
+    func testingImport() {
+        let umbrella = #".product(name: "AlulaTesting", package: "alula")"#
+        let web = #".product(name: "AlulaWebTesting", package: "alula")"#
+        #expect(GenerateController.testingModule(umbrella) == "AlulaTesting")
+        #expect(GenerateController.testingModule(web) == "AlulaWebTesting")
+        let names = try? ControllerNames("orders")
+        let test = names?.testSource(target: "Shop", testing: "AlulaTesting") ?? ""
+        #expect(test.contains("import AlulaTesting\n"))
+        #expect(!test.contains("AlulaWebTesting"))
+    }
 }
 
 @Suite("alula dev watcher")
@@ -137,6 +149,31 @@ struct GenerateAuthTests {
     @Test("timestamps are the fourteen UTC digits migrations are named with")
     func timestamp() {
         #expect(GenerateAuth.timestamp(Date(timeIntervalSince1970: 0)) == "19700101000000")
+    }
+
+    /// The products the app needs, and for its tests either the `AlulaTesting`
+    /// umbrella or both of the individual testing products the test imports.
+    @Test("AlulaTesting, or both individual testing products, satisfies the test target")
+    func testProducts() {
+        let app = GenerateAuth.requiredProducts.map { "\"\($0)\"" }.joined(separator: " ")
+        #expect(GenerateAuth.missingProducts(app + #" "AlulaTesting""#).isEmpty)
+        #expect(
+            GenerateAuth.missingProducts(app + #" "AlulaMailTesting" "AlulaQueueTesting""#)
+                .isEmpty)
+        #expect(GenerateAuth.missingProducts(app + #" "AlulaMailTesting""#) == ["AlulaTesting"])
+        #expect(GenerateAuth.missingProducts("").count == GenerateAuth.requiredProducts.count + 1)
+    }
+
+    @Test("the written test imports what the manifest names")
+    func testImports() throws {
+        let files = try #require(EmbeddedTemplates.files["_auth"])
+        let test = try #require(files["Tests/AppTests/AccountFlowsTests.swift"])
+        #expect(test.contains("import AlulaTesting\n"))
+        #expect(GenerateAuth.testImports(test, manifest: #""AlulaTesting""#) == test)
+        let individual = GenerateAuth.testImports(
+            test, manifest: #""AlulaMailTesting" "AlulaQueueTesting""#)
+        #expect(!individual.contains("import AlulaTesting\n"))
+        #expect(individual.contains("import AlulaMailTesting\nimport AlulaQueueTesting\n"))
     }
 }
 

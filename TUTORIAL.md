@@ -36,8 +36,8 @@ Three ideas carry most of the framework, and they are worth having in mind
 before any code:
 
 **Registration happens at build time.** A build plugin scans your target for
-`@Controller`, `@Service`, `@Repository`, and `@Component`, and generates the
-registration code. Adding a controller does not mean editing a list. A
+`@Controller`, `@Service`, and `@Repository`, and generates the registration
+code. Adding a controller does not mean editing a list. A
 misspelled configuration key is a compile error, not a 3am page.
 
 **Composition is by module, and modules form a DAG.** You choose behaviour by
@@ -84,15 +84,13 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/Alula-Framework/alula.git",
-                 from: "0.57.0", traits: ["Web"])
+                 from: "0.60.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
             name: "App",
             dependencies: [
-                .product(name: "AlulaCore", package: "alula"),
                 .product(name: "AlulaWeb", package: "alula"),
-                .product(name: "AlulaTransport", package: "alula"),
                 .product(name: "AlulaActuator", package: "alula"),
             ],
             plugins: [
@@ -103,8 +101,9 @@ let package = Package(
 )
 ```
 
-One package dependency gives you four products. `alula` is a single package
-with many library products, so you take what you use — and `traits: ["Web"]`
+One package dependency gives you two products: `AlulaWeb`, which brings the
+core and an HTTP transport with it, and `AlulaActuator`. `alula` is a single
+package with many library products, so you take what you use — and `traits: ["Web"]`
 says which of its optional layers you want. Nothing you do not name gets
 resolved: the authentication stack and its JWT dependencies are simply absent
 from this project.
@@ -112,8 +111,10 @@ from this project.
 **`AlulaTransport` deserves a note.** Alula Web owns routing, middleware,
 and the request/response model; it does not own a socket. `AlulaTransport`
 is the default transport, wrapping HummingbirdCore — a mature, versioned HTTP
-implementation. Alula does not hand-roll HTTP parsing, and any conforming
-transport is a peer of this one.
+implementation. The `AlulaWeb` product includes it, so it needs no line of
+its own, but it is still a separate module: `Main.swift` imports it and names
+it as the module that serves HTTP. Alula does not hand-roll HTTP parsing, and
+any conforming transport is a peer of this one.
 
 **The plugin is not optional decoration.** It scans your sources and generates
 the composition root from what it finds — `alulaComposeModules`, which builds
@@ -189,8 +190,8 @@ struct Main {
 
 **`AppModule` has no body, and that is the point.** It names the subsystems
 this application is built on — nothing, so far — and nothing else. Every
-`@Controller`, `@Service`, `@Repository`, and `@Component` in your sources is
-found by the plugin and wired by the generated composition root, so adding a
+`@Controller`, `@Service`, and `@Repository` in your sources is found by the
+plugin and wired by the generated composition root, so adding a
 controller never means editing this file.
 
 `alulaComposeModules` does not exist in any file you wrote — the plugin
@@ -287,9 +288,9 @@ Add the test target to `Package.swift`:
     name: "AppTests",
     dependencies: [
         "App",
-        .product(name: "AlulaCore", package: "alula"),
         .product(name: "AlulaWeb", package: "alula"),
-        .product(name: "AlulaWebTesting", package: "alula"),
+        // Every testing module behind one `import AlulaTesting`.
+        .product(name: "AlulaTesting", package: "alula"),
     ]
 )
 ```
@@ -298,8 +299,8 @@ And `Tests/AppTests/HealthControllerTests.swift`:
 
 ```swift
 import AlulaCore
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import Testing
 
 @testable import App
@@ -386,9 +387,9 @@ Note that `require` does **not** verify certificates; `verify-full` does.
 ```swift
 dependencies: [
     .package(url: "https://github.com/Alula-Framework/alula.git",
-             from: "0.57.0", traits: ["Web"]),
+             from: "0.60.0", traits: ["Web"]),
     .package(url: "https://github.com/Alula-Framework/alula-data.git",
-             from: "0.23.0", traits: ["Postgres"]),
+             from: "0.24.0", traits: ["Postgres"]),
 ],
 ```
 
@@ -590,7 +591,7 @@ import Foundation
 
 @Repository
 struct UserRepository: UserRepositoryProtocol {
-    // alula:hand-registered — PostgresDataModule registers the pool.
+    // PostgresDataModule registers the pool; the build sees module values.
     @Inject var pool: PostgresDataSource
 
     func all() async throws -> [User] {
@@ -1110,11 +1111,9 @@ The socket itself is a route, so it is declared like one, in
 ```swift
 @Controller
 struct SocketController {
-    // The marker says the scanner is right not to have found these: both are
-    // provided by a module rather than scanned from an annotation here.
-    // alula:hand-registered
+    // Both are provided by a module rather than scanned from an annotation
+    // here; the build sees module values, so nothing needs marking.
     @Inject var validator: any TokenValidator
-    // alula:hand-registered
     @Inject var sockets: ChannelSockets
 
     @WebSocketRoute("/socket")

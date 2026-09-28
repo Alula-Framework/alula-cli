@@ -1,5 +1,5 @@
 import AlulaCore
-import AlulaWebTesting
+import AlulaTesting
 import Foundation
 import Testing
 

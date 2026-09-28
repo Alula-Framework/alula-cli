@@ -11,7 +11,6 @@ struct UserRepository: UserRepositoryProtocol {
     /// The pool. Each method leases a connection for its own work and gives
     /// it back; a unit of work that must share one connection says so by
     /// putting every statement inside a single `withRepo`.
-    // alula:hand-registered — PostgresDataModule registers the pool.
     @Inject var pool: PostgresDataSource
 
     func all() async throws -> [User] {

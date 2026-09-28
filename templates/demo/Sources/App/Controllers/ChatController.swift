@@ -64,11 +64,8 @@ struct ChatController {
     @Inject var digests: RoomDigestService
 
     /// Provided by `AlulaPresenceModule` and `AlulaChannelsModule` rather
-    /// than scanned from this target, so they are roots of the graph. The
-    /// marker says the scanner is right not to have found them.
-    // alula:hand-registered
+    /// than scanned from this target, so they are roots of the graph.
     @Inject var presence: any Presence
-    // alula:hand-registered
     @Inject var broadcaster: ChannelBroadcaster
 
     // MARK: Associations

@@ -1,7 +1,6 @@
 import AlulaCore
-import AlulaSessionsTesting
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import Foundation
 import HTTPTypes
 import Testing

@@ -19,20 +19,20 @@ let package = Package(
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // core: configuration, composition, and the service lifecycle.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.57.0", traits: ["Web"])
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.60.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
             name: "App",
             dependencies: [
-                .product(name: "AlulaCore", package: "alula"),
+                // HTTP, and the default transport that serves it (Main.swift
+                // imports AlulaTransport). Choosing a transport is choosing a
+                // module; this one wraps HummingbirdCore, and any conforming
+                // transport is a peer.
                 .product(name: "AlulaWeb", package: "alula"),
-                // Choosing a transport is choosing a module. This one wraps
-                // HummingbirdCore; any conforming transport is a peer.
-                .product(name: "AlulaTransport", package: "alula"),
                 .product(name: "AlulaActuator", package: "alula"),
             ],
-            // Scans this target for @Component/@Controller/@Service and
+            // Scans this target for @Controller/@Service/@Repository and
             // generates the composition root (`alulaComposeModules`) at build time. It also checks
             // every @ConfigValue key without a default against alula.yaml,
             // so a missing key is a compile error rather than a 3am page.
@@ -44,9 +44,9 @@ let package = Package(
             name: "AppTests",
             dependencies: [
                 "App",
-                .product(name: "AlulaCore", package: "alula"),
                 .product(name: "AlulaWeb", package: "alula"),
-                .product(name: "AlulaWebTesting", package: "alula"),
+                // Every testing module behind one import: `import AlulaTesting`.
+                .product(name: "AlulaTesting", package: "alula"),
             ]
         ),
     ]

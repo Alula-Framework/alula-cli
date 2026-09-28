@@ -1,6 +1,6 @@
 import AlulaCore
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import Testing
 
 @testable import App

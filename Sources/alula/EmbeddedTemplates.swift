@@ -523,10 +523,9 @@ struct CreateAccounts: Migration {
 """#,
             "Tests/AppTests/AccountFlowsTests.swift": #"""
 import AlulaMail
-import AlulaMailTesting
-import AlulaQueueTesting
 import AlulaRateLimit
 import AlulaSecurityCore
+import AlulaTesting
 import AlulaWeb
 import Foundation
 import Synchronization
@@ -795,16 +794,14 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.57.0", traits: ["Web"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.23.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.60.0", traits: ["Web"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.24.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
             name: "App",
             dependencies: [
-                .product(name: "AlulaCore", package: "alula"),
                 .product(name: "AlulaWeb", package: "alula"),
-                .product(name: "AlulaTransport", package: "alula"),
                 .product(name: "AlulaActuator", package: "alula"),
                 .product(name: "AlulaDataPostgres", package: "alula-data"),
             ],
@@ -836,9 +833,8 @@ let package = Package(
             name: "AppTests",
             dependencies: [
                 "App",
-                .product(name: "AlulaCore", package: "alula"),
                 .product(name: "AlulaWeb", package: "alula"),
-                .product(name: "AlulaWebTesting", package: "alula"),
+                .product(name: "AlulaTesting", package: "alula"),
                 .product(name: "AlulaDataPostgres", package: "alula-data"),
             ]
         ),
@@ -967,9 +963,9 @@ import AlulaWeb
 /// Your application's module: one place that says what this app is made of.
 ///
 /// It declares the subsystems this app is built on. Everything else — every
-/// `@Controller`, `@Service`, `@Repository`, and `@Component` the registration
-/// plugin scans, including the binding from `(any UserRepositoryProtocol)` to
-/// its one conformer — is wired by the generated composition root, so adding a
+/// `@Controller`, `@Service`, and `@Repository` the registration plugin
+/// scans, including the binding from `(any UserRepositoryProtocol)` to its one
+/// conformer — is wired by the generated composition root, so adding a
 /// controller does not mean editing this file.
 struct AppModule: AlulaModule {
     /// Modules that must be built before this one. The list is a DAG resolved
@@ -1027,13 +1023,9 @@ import Foundation
 /// `repo.transaction { }` inside that.
 @Repository
 struct UserRepository: UserRepositoryProtocol {
-    /// The pool, registered by `PostgresDataModule<PrimaryDataSource>`.
-    ///
-    /// `alula:hand-registered` records that this type comes from a module
-    /// rather than being scanned from this target. The composer sees module
-    /// values, so the build needs no help here; if nothing provided the pool,
-    /// the build would fail with ALU-DI-1001 marker or not.
-    // alula:hand-registered — PostgresDataModule registers the pool.
+    /// The pool, registered by `PostgresDataModule<PrimaryDataSource>`. The
+    /// composer sees module values, so nothing here needs marking; if nothing
+    /// provided the pool, the build would fail with ALU-DI-1001.
     @Inject var pool: PostgresDataSource
 
     func all() async throws -> [User] {
@@ -1139,8 +1131,8 @@ struct Migrate: MigrateTool {
             "Tests/AppTests/HealthControllerTests.swift": #"""
 import AlulaCore
 import AlulaDataPostgres
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import Testing
 
 @testable import App
@@ -1225,8 +1217,8 @@ let ada = User(
 """#,
             "Tests/AppTests/UserControllerTests.swift": #"""
 import AlulaCore
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import Foundation
 import Testing
 
@@ -1560,16 +1552,14 @@ let package = Package(
     dependencies: [
         // "defaults" keeps the Web trait on; "Security" adds the resource
         // server. Naming any trait means "default" must be named too.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.57.0", traits: ["Security"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.23.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.60.0", traits: ["Security"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.24.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
             name: "App",
             dependencies: [
-                .product(name: "AlulaCore", package: "alula"),
                 .product(name: "AlulaWeb", package: "alula"),
-                .product(name: "AlulaTransport", package: "alula"),
                 .product(name: "AlulaActuator", package: "alula"),
                 .product(name: "AlulaScheduler", package: "alula"),
                 .product(name: "AlulaQueue", package: "alula"),
@@ -1612,21 +1602,16 @@ let package = Package(
             name: "AppTests",
             dependencies: [
                 "App",
-                .product(name: "AlulaCore", package: "alula"),
                 .product(name: "AlulaWeb", package: "alula"),
-                .product(name: "AlulaWebTesting", package: "alula"),
-                .product(name: "AlulaSessionsTesting", package: "alula"),
-                .product(name: "AlulaRateLimitTesting", package: "alula"),
+                // Every testing module — Web, Sessions, RateLimit, Queue,
+                // Mail, Channels, PubSub — behind one `import AlulaTesting`.
+                .product(name: "AlulaTesting", package: "alula"),
                 .product(name: "AlulaQueue", package: "alula"),
-                .product(name: "AlulaQueueTesting", package: "alula"),
                 .product(name: "AlulaMail", package: "alula"),
-                .product(name: "AlulaMailTesting", package: "alula"),
                 .product(name: "AlulaChannels", package: "alula"),
-                .product(name: "AlulaChannelsTesting", package: "alula"),
                 .product(name: "AlulaChannelsClient", package: "alula"),
                 .product(name: "AlulaPresence", package: "alula"),
                 .product(name: "AlulaPresenceClient", package: "alula"),
-                .product(name: "AlulaPubSubTesting", package: "alula"),
                 .product(name: "AlulaDataPostgres", package: "alula-data"),
                 .product(name: "AlulaCache", package: "alula-data"),
             ]
@@ -1947,11 +1932,8 @@ struct ChatController {
     @Inject var digests: RoomDigestService
 
     /// Provided by `AlulaPresenceModule` and `AlulaChannelsModule` rather
-    /// than scanned from this target, so they are roots of the graph. The
-    /// marker says the scanner is right not to have found them.
-    // alula:hand-registered
+    /// than scanned from this target, so they are roots of the graph.
     @Inject var presence: any Presence
-    // alula:hand-registered
     @Inject var broadcaster: ChannelBroadcaster
 
     // MARK: Associations
@@ -2309,9 +2291,9 @@ import AlulaWeb
 ///          -H 'Cookie: session=…' -H 'X-CSRF-Token: …'       # the same token, still
 @Controller("/session")
 struct SessionController {
-    /// Whichever sign-in module is listed provides it.
-    // alula:hand-registered — a value AlulaPasswordSignInModule (or
-    // AlulaOIDCSignInModule) holds, not a scanned component.
+    /// Whichever sign-in module is listed provides it: a value
+    /// AlulaPasswordSignInModule (or AlulaOIDCSignInModule) holds, not a
+    /// scanned component.
     @Inject var provider: any SignInProvider
 
     /// What `GET /csrf` answers: the token a browser sends back on
@@ -2409,23 +2391,17 @@ struct SocketController {
     /// rather than pulled from the context, so the dependency is visible in the
     /// type rather than discovered when the closure runs.
     ///
-    /// The marker acknowledges that this one is provided by a module — the
-    /// bring-your-own-auth seam, `DemoAuthModule`'s `tokenValidator` value —
-    /// rather than scanned from an annotation. In an application the
-    /// composer already sees module values, and a type nothing provides fails
-    /// the build there (ALU-DI-1001) marker or not; the marker is what says,
-    /// to the scanner and the reader, that no @Component is expected. Were a
-    /// @Component conformer ever added, the marker would also stop the
-    /// generator bridging `any TokenValidator` to it and colliding with the
-    /// module's value.
-    // alula:hand-registered
+    /// It comes from a module — the bring-your-own-auth seam,
+    /// `DemoAuthModule`'s `tokenValidator` value — rather than from an
+    /// annotation. The build sees module values, so nothing marks it; a type
+    /// nothing provides fails the build (ALU-DI-1001), and a scanned conformer
+    /// added later would not displace the module's value.
     @Inject var validator: any TokenValidator
 
     /// The channels stack, injected as one value. It used to be built with
     /// `ChannelSocketHandler(context:)`, which resolved the router, the bus
     /// and the channels configuration out of every upgrade request — three
     /// lookups of things the composition root wired at start-up.
-    // alula:hand-registered
     @Inject var sockets: ChannelSockets
 
     /// The upgrade request is where identity is established — before the
@@ -3112,7 +3088,6 @@ struct ChatRepository: RoomStore {
     /// work through `withRepo` and gives it back — there is no request-scoped
     /// connection, so "which connection is this query on" is answered by the
     /// bracket you can see rather than by a scope you cannot.
-    // alula:hand-registered — PostgresDataModule registers the pool.
     @Inject var pool: PostgresDataSource
 
     // MARK: Associations
@@ -3504,7 +3479,6 @@ struct UserRepository: UserRepositoryProtocol {
     /// The pool. Each method leases a connection for its own work and gives
     /// it back; a unit of work that must share one connection says so by
     /// putting every statement inside a single `withRepo`.
-    // alula:hand-registered — PostgresDataModule registers the pool.
     @Inject var pool: PostgresDataSource
 
     func all() async throws -> [User] {
@@ -4153,8 +4127,8 @@ struct Migrate: MigrateTool {
 """#,
             "Tests/AppTests/AttachmentControllerTests.swift": #"""
 import AlulaCore
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import Foundation
 import Testing
 @testable import App
@@ -4330,7 +4304,7 @@ struct BootstrapTests {
 """#,
             "Tests/AppTests/ChatJobsTests.swift": #"""
 import AlulaCore
-import AlulaWebTesting
+import AlulaTesting
 import Foundation
 import Testing
 
@@ -4462,10 +4436,9 @@ struct OpenAPIDocumentTests {
             "Tests/AppTests/RateLimitingTests.swift": #"""
 import AlulaCore
 import AlulaRateLimit
-import AlulaRateLimitTesting
 import AlulaSecurityCore
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import HTTPTypes
 import Testing
 
@@ -4573,14 +4546,13 @@ struct RateLimitingTests {
             "Tests/AppTests/RealtimeTests.swift": #"""
 import AlulaChannels
 import AlulaChannelsClient
-import AlulaChannelsTesting
 import AlulaCore
 import AlulaPresence
 import AlulaPresenceClient
 import AlulaPubSub
 import AlulaSecurityCore
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import Foundation
 import Testing
 
@@ -5006,9 +4978,8 @@ struct RoomChannelTests {
 import AlulaCore
 import AlulaRateLimit
 import AlulaSecurityCore
-import AlulaSessionsTesting
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import Foundation
 import HTTPTypes
 import Testing
@@ -5299,9 +5270,8 @@ final class MockUserRepository: UserRepositoryProtocol, Sendable {
             "Tests/AppTests/UserControllerTests.swift": #"""
 import AlulaCore
 import AlulaMail
-import AlulaQueueTesting
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import Foundation
 import Testing
 @testable import App
@@ -5441,9 +5411,7 @@ private struct UserPayload: Decodable {
             "Tests/AppTests/UserServiceTests.swift": #"""
 import AlulaCore
 import AlulaMail
-import AlulaMailTesting
-import AlulaQueueTesting
-import AlulaWebTesting
+import AlulaTesting
 import Foundation
 import Testing
 @testable import App
@@ -5513,9 +5481,8 @@ extension Mailer {
 """#,
             "Tests/AppTests/VisitsControllerTests.swift": #"""
 import AlulaCore
-import AlulaSessionsTesting
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import Foundation
 import HTTPTypes
 import Testing
@@ -5827,20 +5794,20 @@ let package = Package(
         // resolved. "Web" is HTTP, WebSockets, Channels and Presence; add
         // "Security" for authentication. Naming neither gives you just the
         // core: configuration, composition, and the service lifecycle.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.57.0", traits: ["Web"])
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.60.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
             name: "App",
             dependencies: [
-                .product(name: "AlulaCore", package: "alula"),
+                // HTTP, and the default transport that serves it (Main.swift
+                // imports AlulaTransport). Choosing a transport is choosing a
+                // module; this one wraps HummingbirdCore, and any conforming
+                // transport is a peer.
                 .product(name: "AlulaWeb", package: "alula"),
-                // Choosing a transport is choosing a module. This one wraps
-                // HummingbirdCore; any conforming transport is a peer.
-                .product(name: "AlulaTransport", package: "alula"),
                 .product(name: "AlulaActuator", package: "alula"),
             ],
-            // Scans this target for @Component/@Controller/@Service and
+            // Scans this target for @Controller/@Service/@Repository and
             // generates the composition root (`alulaComposeModules`) at build time. It also checks
             // every @ConfigValue key without a default against alula.yaml,
             // so a missing key is a compile error rather than a 3am page.
@@ -5852,9 +5819,9 @@ let package = Package(
             name: "AppTests",
             dependencies: [
                 "App",
-                .product(name: "AlulaCore", package: "alula"),
                 .product(name: "AlulaWeb", package: "alula"),
-                .product(name: "AlulaWebTesting", package: "alula"),
+                // Every testing module behind one import: `import AlulaTesting`.
+                .product(name: "AlulaTesting", package: "alula"),
             ]
         ),
     ]
@@ -5896,8 +5863,8 @@ import AlulaWeb
 /// Your application's module: one place that says what this app is made of.
 ///
 /// It declares the subsystems this app is built on. Everything else — every
-/// `@Controller`, `@Service`, `@Repository`, and `@Component` the registration
-/// plugin scans — is wired by the generated composition root, so adding a
+/// `@Controller`, `@Service`, and `@Repository` the registration plugin
+/// scans — is wired by the generated composition root, so adding a
 /// controller does not mean editing this file.
 struct AppModule: AlulaModule {
     /// Modules that must be built before this one. The list is a DAG resolved
@@ -5945,8 +5912,8 @@ struct Main {
 """#,
             "Tests/AppTests/HealthControllerTests.swift": #"""
 import AlulaCore
+import AlulaTesting
 import AlulaWeb
-import AlulaWebTesting
 import Testing
 
 @testable import App

@@ -44,10 +44,21 @@ struct GenerateController: ParsableCommand {
             throw CLIError.fileExists(file.path)
         }
         try write(names.controllerSource(), to: source)
-        try write(names.testSource(target: target), to: test)
+        try write(
+            names.testSource(
+                target: target, testing: GenerateController.testingModule(project.manifest)),
+            to: test)
         print("created \(source.path.replacingOccurrences(of: project.root.path + "/", with: ""))")
         print("created \(test.path.replacingOccurrences(of: project.root.path + "/", with: ""))")
         print("routes: GET \(names.path), GET \(names.path)/:id")
+    }
+
+    /// The testing module the generated test imports: the `AlulaTesting`
+    /// umbrella when the manifest names it, as every template since alula
+    /// 0.60.0 does; `AlulaWebTesting`, the one product the test needs,
+    /// otherwise.
+    static func testingModule(_ manifest: String) -> String {
+        manifest.contains("\"AlulaTesting\"") ? "AlulaTesting" : "AlulaWebTesting"
     }
 
     private func write(_ contents: String, to file: URL) throws {
@@ -85,14 +96,35 @@ struct GenerateAuth: ParsableCommand {
         "AlulaSecurityCore", "AlulaRateLimit", "AlulaMail", "AlulaQueue", "AlulaDataPostgres",
         "AlulaMigrate",
     ]
-    static let requiredTestProducts = ["AlulaMailTesting", "AlulaQueueTesting"]
+    /// What the written test imports: the `AlulaTesting` umbrella, or both of
+    /// the individual products it re-exports that the test uses.
+    static let umbrellaTestProduct = "AlulaTesting"
+    static let individualTestProducts = ["AlulaMailTesting", "AlulaQueueTesting"]
+
+    /// The products `manifest` lacks, naming the umbrella for the test target
+    /// when neither form is there.
+    static func missingProducts(_ manifest: String) -> [String] {
+        let names = { (product: String) in manifest.contains("\"\(product)\"") }
+        var missing = requiredProducts.filter { !names($0) }
+        if !names(umbrellaTestProduct), !individualTestProducts.allSatisfy(names) {
+            missing.append(umbrellaTestProduct)
+        }
+        return missing
+    }
+
+    /// The template's test imports `AlulaTesting`; a manifest that names the
+    /// individual products instead gets imports of those.
+    static func testImports(_ contents: String, manifest: String) -> String {
+        guard !manifest.contains("\"\(umbrellaTestProduct)\"") else { return contents }
+        return contents.replacingOccurrences(
+            of: "import \(umbrellaTestProduct)\n",
+            with: individualTestProducts.map { "import \($0)\n" }.joined())
+    }
 
     func run() throws {
         let project = try Project.locate()
         let manifest = project.manifest
-        let missing = (Self.requiredProducts + Self.requiredTestProducts).filter {
-            !manifest.contains("\"\($0)\"")
-        }
+        let missing = Self.missingProducts(manifest)
         guard missing.isEmpty else { throw CLIError.missingProducts(missing) }
         guard project.hasMigrateExecutable else {
             throw CLIError.noMigrateExecutable(project.root.path)
@@ -109,8 +141,10 @@ struct GenerateAuth: ParsableCommand {
                 .replacingOccurrences(of: "__TIMESTAMP__", with: stamp)
                 .replacingOccurrences(of: "Sources/App/", with: "Sources/\(target)/")
                 .replacingOccurrences(of: "Tests/AppTests/", with: "Tests/\(target)Tests/")
-            let contents = contents.replacingOccurrences(
-                of: "@testable import App\n", with: "@testable import \(target)\n")
+            let contents = Self.testImports(
+                contents.replacingOccurrences(
+                    of: "@testable import App\n", with: "@testable import \(target)\n"),
+                manifest: manifest)
             return (project.root.appendingPathComponent(path), contents)
         }.sorted { $0.0.path < $1.0.path }
 
@@ -217,33 +251,31 @@ struct ControllerNames: Equatable {
         """
     }
 
-    func testSource(target: String) -> String {
-        """
-        import AlulaCore
-        import AlulaWeb
-        import AlulaWebTesting
-        import Foundation
-        import Testing
+    func testSource(target: String, testing: String = "AlulaWebTesting") -> String {
+        let imports = ["AlulaCore", "AlulaWeb", testing, "Foundation", "Testing"].sorted()
+            .map { "import \($0)" }.joined(separator: "\n")
+        return """
+            \(imports)
 
-        @testable import \(target)
+            @testable import \(target)
 
-        @Suite("\(type)")
-        struct \(type)Tests {
-            private func client() throws -> TestClient {
-                try TestClient(routes: \(type).alulaRoutes { _ in \(type)() })
+            @Suite("\(type)")
+            struct \(type)Tests {
+                private func client() throws -> TestClient {
+                    try TestClient(routes: \(type).alulaRoutes { _ in \(type)() })
+                }
+
+                @Test("list answers")
+                func list() async throws {
+                    #expect(await (try client()).get("\(path)").status == .ok)
+                }
+
+                @Test("show refuses an id that is not a UUID")
+                func showValidatesTheID() async throws {
+                    #expect(await (try client()).get("\(path)/not-a-uuid").status == .badRequest)
+                }
             }
 
-            @Test("list answers")
-            func list() async throws {
-                #expect(await (try client()).get("\(path)").status == .ok)
-            }
-
-            @Test("show refuses an id that is not a UUID")
-            func showValidatesTheID() async throws {
-                #expect(await (try client()).get("\(path)/not-a-uuid").status == .badRequest)
-            }
-        }
-
-        """
+            """
     }
 }

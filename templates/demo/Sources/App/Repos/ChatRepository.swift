@@ -71,7 +71,6 @@ struct ChatRepository: RoomStore {
     /// work through `withRepo` and gives it back — there is no request-scoped
     /// connection, so "which connection is this query on" is answered by the
     /// bracket you can see rather than by a scope you cannot.
-    // alula:hand-registered — PostgresDataModule registers the pool.
     @Inject var pool: PostgresDataSource
 
     // MARK: Associations

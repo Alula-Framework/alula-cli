@@ -15,16 +15,14 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.57.0", traits: ["Web"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.23.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.60.0", traits: ["Web"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.24.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(
             name: "App",
             dependencies: [
-                .product(name: "AlulaCore", package: "alula"),
                 .product(name: "AlulaWeb", package: "alula"),
-                .product(name: "AlulaTransport", package: "alula"),
                 .product(name: "AlulaActuator", package: "alula"),
                 .product(name: "AlulaDataPostgres", package: "alula-data"),
             ],
@@ -56,9 +54,8 @@ let package = Package(
             name: "AppTests",
             dependencies: [
                 "App",
-                .product(name: "AlulaCore", package: "alula"),
                 .product(name: "AlulaWeb", package: "alula"),
-                .product(name: "AlulaWebTesting", package: "alula"),
+                .product(name: "AlulaTesting", package: "alula"),
                 .product(name: "AlulaDataPostgres", package: "alula-data"),
             ]
         ),
