@@ -30,6 +30,10 @@ struct Run: ParsableCommand {
     @Argument(parsing: .captureForPassthrough, help: "The command and its arguments.")
     var arguments: [String] = []
 
+    mutating func validate() throws {
+        arguments = try Self.passthrough(arguments)
+    }
+
     func run() throws {
         let project = try Project.locate()
         let product = try self.product ?? Dev.defaultProduct(in: project.root)

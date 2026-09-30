@@ -33,6 +33,10 @@ struct Dev: AsyncParsableCommand {
     @Argument(parsing: .captureForPassthrough, help: "Arguments passed to the app.")
     var arguments: [String] = []
 
+    mutating func validate() throws {
+        arguments = try Self.passthrough(arguments)
+    }
+
     func run() async throws {
         let project = try Project.locate()
         let product = try self.product ?? Self.defaultProduct(in: project.root)
@@ -108,6 +112,22 @@ struct Dev: AsyncParsableCommand {
             throw CLIError.delegateFailed(process.terminationStatus)
         }
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+extension ParsableCommand {
+    /// The app's arguments, from an argument parsed with
+    /// `.captureForPassthrough`. That strategy captures everything after the
+    /// command's own options, `--help` and the `--` separator included, so
+    /// without this `alula dev --help` would run the app with `--help`, and
+    /// `alula dev -- --flag` would pass the app a literal `--`. A help flag
+    /// first is this command's; after `--` or another argument, the app's.
+    static func passthrough(_ arguments: [String]) throws -> [String] {
+        switch arguments.first {
+        case "--help", "-h": throw CleanExit.helpRequest(self)
+        case "--": return Array(arguments.dropFirst())
+        default: return arguments
+        }
     }
 }
 

@@ -190,3 +190,42 @@ struct DevEnvironmentTests {
         #expect(AppRunner.developmentEnvironment(["ALULA_ENV": "test"])["ALULA_ENV"] == "test")
     }
 }
+
+@Suite("alula dev and run parse --help")
+struct PassthroughHelpTests {
+    /// Whether parsing `arguments` asks for the command's own help, as
+    /// `alula help <command>` does.
+    static func showsHelp(_ arguments: [String]) -> Bool {
+        do {
+            _ = try Alula.parseAsRoot(arguments)
+            return false
+        } catch {
+            return Alula.exitCode(for: error) == .success
+                && Alula.fullMessage(for: error).contains("USAGE: alula \(arguments[0])")
+        }
+    }
+
+    @Test("--help and -h before any app argument show the command's help")
+    func helpFlags() {
+        for command in ["dev", "run"] {
+            for flag in ["--help", "-h"] {
+                #expect(Self.showsHelp([command, flag]), "\(command) \(flag)")
+            }
+        }
+        #expect(Self.showsHelp(["dev", "--product", "Worker", "--help"]))
+    }
+
+    @Test("--help meant for the app still reaches it")
+    func passedThrough() throws {
+        let dev = try #require(try Alula.parseAsRoot(["dev", "--", "--help"]) as? Dev)
+        #expect(dev.arguments == ["--help"])
+        let flag = try #require(try Alula.parseAsRoot(["dev", "--", "--flag"]) as? Dev)
+        #expect(flag.arguments == ["--flag"])
+        let run = try #require(try Alula.parseAsRoot(["run", "import-users", "--help"]) as? Run)
+        #expect(run.arguments == ["import-users", "--help"])
+        let separated = try #require(try Alula.parseAsRoot(["run", "--", "-h"]) as? Run)
+        #expect(separated.arguments == ["-h"])
+        let bare = try #require(try Alula.parseAsRoot(["run"]) as? Run)
+        #expect(bare.arguments.isEmpty)
+    }
+}
