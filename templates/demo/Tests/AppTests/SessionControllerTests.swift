@@ -23,7 +23,7 @@ struct SessionControllerTests {
             store: store)
         // No bearer validator is needed for a browser; the demo's is for its
         // APIs, and it is exercised elsewhere.
-        let security = AlulaSecurityModule(validator: nil, sessions: sessions.runtime)
+        let security = try AlulaSecurityModule(validator: nil, sessions: sessions.runtime)
         // The demo's accounts, and the password provider over them — hashed
         // with cheap parameters so the suite stays fast.
         let fast = Argon2idHashing(parameters: .init(timeCost: 1, memoryCost: 8, parallelism: 1))
