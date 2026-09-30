@@ -16,8 +16,8 @@ let package = Package(
     dependencies: [
         // "Security" adds the resource server, and implies "Web" (HTTP,
         // WebSockets, Channels, Presence), so naming it alone is enough.
-        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.60.0", traits: ["Security"]),
-        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.24.0", traits: ["Postgres"]),
+        .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.61.0", traits: ["Security"]),
+        .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.25.0", traits: ["Postgres"]),
     ],
     targets: [
         .executableTarget(

@@ -85,7 +85,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/Alula-Framework/alula.git",
-                 from: "0.60.0", traits: ["Web"])
+                 from: "0.61.0", traits: ["Web"])
     ],
     targets: [
         .executableTarget(
@@ -396,9 +396,9 @@ Note that `require` does **not** verify certificates; `verify-full` does.
 ```swift
 dependencies: [
     .package(url: "https://github.com/Alula-Framework/alula.git",
-             from: "0.60.0", traits: ["Web"]),
+             from: "0.61.0", traits: ["Web"]),
     .package(url: "https://github.com/Alula-Framework/alula-data.git",
-             from: "0.24.0", traits: ["Postgres"]),
+             from: "0.25.0", traits: ["Postgres"]),
 ],
 ```
 
