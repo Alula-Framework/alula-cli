@@ -25,7 +25,7 @@ struct CreateUsers: Migration {
     }
 
     /// Every migration says how to undo itself, which is what makes
-    /// `migrate down` something you can run rather than something you fear.
+    /// `migrate rollback` something you can run rather than something you fear.
     func down(_ schema: SchemaBuilder) {
         schema.dropTable("users")
     }

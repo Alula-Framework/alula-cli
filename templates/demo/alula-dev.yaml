@@ -1,5 +1,7 @@
-# Loaded on top of alula.yaml when ALULA_ENV is `dev`, which is what an
-# unset ALULA_ENV means. Nothing in here belongs in production.
+# Loaded on top of alula.yaml when ALULA_ENV is `dev`, and also when it is
+# unset. Unset is not enough for the development-only surfaces, though: logged
+# mail, the OpenAPI document and the actuator dashboard need ALULA_ENV=dev
+# stated, which `alula dev` does. Nothing in here belongs in production.
 
 sessions:
   # The session cookie is `Secure` by default, because it is a bearer

@@ -65,17 +65,19 @@ struct AppModule: AlulaModule {
             // across every replica instead of one thing per replica.
             AlulaRateLimitModule.self,
             // Background jobs, kept in Postgres (the `alula_jobs` table, created
-            // by the CreateJobs migration), and email sent through them. In
-            // development mail is logged rather than sent; anywhere else,
-            // AlulaMailModule refuses to start without a transport — add
-            // AlulaMailSMTPModule (the "SMTP" trait) and `mail.smtp.*`.
+            // by the CreateJobs migration), and email sent through them. When
+            // ALULA_ENV declares development (`alula dev` sets it), mail is
+            // logged rather than sent; anywhere else, including an unset
+            // ALULA_ENV, AlulaMailModule refuses to start without a
+            // transport — add AlulaMailSMTPModule (the "SMTP" trait) and
+            // `mail.smtp.*`.
             AlulaQueuePostgresModule.self,
             AlulaQueueWorkerModule.self,
             AlulaMailModule.self,
             // GET /openapi.json: every route and payload type, written by the
             // build from the controllers below. Served only when ALULA_ENV
-            // declares dev or test (`alula dev` sets it), unless
-            // `openapi.enabled: true`.
+            // names a development environment (dev, development, test,
+            // local; `alula dev` sets dev), unless `openapi.enabled: true`.
             AlulaOpenAPIModule.self,
         ]
     }

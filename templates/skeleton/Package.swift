@@ -25,10 +25,11 @@ let package = Package(
         .executableTarget(
             name: "App",
             dependencies: [
-                // HTTP, and the default transport that serves it (Main.swift
-                // imports AlulaTransport). Choosing a transport is choosing a
-                // module; this one wraps HummingbirdCore, and any conforming
-                // transport is a peer.
+                // HTTP, and the default transport that serves it: AlulaWeb
+                // carries AlulaTransport, which Main.swift imports, so no
+                // second product is listed. Choosing a transport is choosing
+                // a module; this one wraps HummingbirdCore, and any
+                // conforming transport is a peer.
                 .product(name: "AlulaWeb", package: "alula"),
                 .product(name: "AlulaActuator", package: "alula"),
             ],

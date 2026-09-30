@@ -41,7 +41,7 @@ let package = Package(
             plugins: [.plugin(name: "AlulaMigratePlugin", package: "alula-data")]
         ),
 
-        // `swift run migrate status | up | down | create`.
+        // `swift run migrate` (apply) | status | rollback | create | repair.
         .executableTarget(
             name: "migrate",
             dependencies: [

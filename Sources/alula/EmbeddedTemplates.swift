@@ -735,7 +735,8 @@ final class InMemoryAccounts: AccountDirectory, Sendable {
 #
 #   docker run --entrypoint ./migrate -e ALULA_DATABASE_URL=... app apply
 #
-# ALULA_ENV is prod, so alula-prod.yaml applies on top of alula.yaml.
+# ALULA_ENV is prod, so an alula-prod.yaml, once you add one, applies on top
+# of alula.yaml (the demo tier has one to copy).
 
 # ── build ────────────────────────────────────────────────────────────────────
 FROM swift:6.3.3-noble AS build
@@ -820,7 +821,7 @@ let package = Package(
             plugins: [.plugin(name: "AlulaMigratePlugin", package: "alula-data")]
         ),
 
-        // `swift run migrate status | up | down | create`.
+        // `swift run migrate` (apply) | status | rollback | create | repair.
         .executableTarget(
             name: "migrate",
             dependencies: [
@@ -1106,7 +1107,7 @@ struct CreateUsers: Migration {
     }
 
     /// Every migration says how to undo itself, which is what makes
-    /// `migrate down` something you can run rather than something you fear.
+    /// `migrate rollback` something you can run rather than something you fear.
     func down(_ schema: SchemaBuilder) {
         schema.dropTable("users")
     }
@@ -1550,8 +1551,8 @@ let package = Package(
         .executable(name: "App", targets: ["App"])
     ],
     dependencies: [
-        // "defaults" keeps the Web trait on; "Security" adds the resource
-        // server. Naming any trait means "default" must be named too.
+        // "Security" adds the resource server, and implies "Web" (HTTP,
+        // WebSockets, Channels, Presence), so naming it alone is enough.
         .package(url: "https://github.com/Alula-Framework/alula.git", from: "0.60.0", traits: ["Security"]),
         .package(url: "https://github.com/Alula-Framework/alula-data.git", from: "0.24.0", traits: ["Postgres"]),
     ],
@@ -2801,17 +2802,19 @@ struct AppModule: AlulaModule {
             // across every replica instead of one thing per replica.
             AlulaRateLimitModule.self,
             // Background jobs, kept in Postgres (the `alula_jobs` table, created
-            // by the CreateJobs migration), and email sent through them. In
-            // development mail is logged rather than sent; anywhere else,
-            // AlulaMailModule refuses to start without a transport — add
-            // AlulaMailSMTPModule (the "SMTP" trait) and `mail.smtp.*`.
+            // by the CreateJobs migration), and email sent through them. When
+            // ALULA_ENV declares development (`alula dev` sets it), mail is
+            // logged rather than sent; anywhere else, including an unset
+            // ALULA_ENV, AlulaMailModule refuses to start without a
+            // transport — add AlulaMailSMTPModule (the "SMTP" trait) and
+            // `mail.smtp.*`.
             AlulaQueuePostgresModule.self,
             AlulaQueueWorkerModule.self,
             AlulaMailModule.self,
             // GET /openapi.json: every route and payload type, written by the
             // build from the controllers below. Served only when ALULA_ENV
-            // declares dev or test (`alula dev` sets it), unless
-            // `openapi.enabled: true`.
+            // names a development environment (dev, development, test,
+            // local; `alula dev` sets dev), unless `openapi.enabled: true`.
             AlulaOpenAPIModule.self,
         ]
     }
@@ -3925,7 +3928,7 @@ struct CreateUsers: Migration {
     }
 
     /// Every migration says how to undo itself, which is what makes
-    /// `migrate down` something you can run rather than something you fear.
+    /// `migrate rollback` something you can run rather than something you fear.
     func down(_ schema: SchemaBuilder) {
         schema.dropTable("users")
     }
@@ -5551,8 +5554,10 @@ struct VisitsControllerTests {
 
 """#,
             "alula-dev.yaml": #"""
-# Loaded on top of alula.yaml when ALULA_ENV is `dev`, which is what an
-# unset ALULA_ENV means. Nothing in here belongs in production.
+# Loaded on top of alula.yaml when ALULA_ENV is `dev`, and also when it is
+# unset. Unset is not enough for the development-only surfaces, though: logged
+# mail, the OpenAPI document and the actuator dashboard need ALULA_ENV=dev
+# stated, which `alula dev` does. Nothing in here belongs in production.
 
 sessions:
   # The session cookie is `Secure` by default, because it is a bearer
@@ -5731,7 +5736,8 @@ volumes:
 #
 #   docker run --entrypoint ./migrate -e ALULA_DATABASE_URL=... app apply
 #
-# ALULA_ENV is prod, so alula-prod.yaml applies on top of alula.yaml.
+# ALULA_ENV is prod, so an alula-prod.yaml, once you add one, applies on top
+# of alula.yaml (the demo tier has one to copy).
 
 # ── build ────────────────────────────────────────────────────────────────────
 FROM swift:6.3.3-noble AS build
@@ -5800,10 +5806,11 @@ let package = Package(
         .executableTarget(
             name: "App",
             dependencies: [
-                // HTTP, and the default transport that serves it (Main.swift
-                // imports AlulaTransport). Choosing a transport is choosing a
-                // module; this one wraps HummingbirdCore, and any conforming
-                // transport is a peer.
+                // HTTP, and the default transport that serves it: AlulaWeb
+                // carries AlulaTransport, which Main.swift imports, so no
+                // second product is listed. Choosing a transport is choosing
+                // a module; this one wraps HummingbirdCore, and any
+                // conforming transport is a peer.
                 .product(name: "AlulaWeb", package: "alula"),
                 .product(name: "AlulaActuator", package: "alula"),
             ],

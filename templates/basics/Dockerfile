@@ -7,7 +7,8 @@
 #
 #   docker run --entrypoint ./migrate -e ALULA_DATABASE_URL=... app apply
 #
-# ALULA_ENV is prod, so alula-prod.yaml applies on top of alula.yaml.
+# ALULA_ENV is prod, so an alula-prod.yaml, once you add one, applies on top
+# of alula.yaml (the demo tier has one to copy).
 
 # ── build ────────────────────────────────────────────────────────────────────
 FROM swift:6.3.3-noble AS build

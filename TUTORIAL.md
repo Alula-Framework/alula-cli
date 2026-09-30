@@ -67,7 +67,8 @@ it — the rest of the tutorial assumes you know what each piece is for.
 The name matters: `alula new` names the target, the executable and the test
 target after the project, so `alula new MyService` writes
 `Sources/MyService/`, `Tests/MyServiceTests/` and `@testable import MyService`,
-and runs with `swift run MyService`. This tutorial calls its target `App`
+and runs with `alula dev`, or `ALULA_ENV=dev swift run MyService` (Stage 1.3's
+checkpoint says why the variable). This tutorial calls its target `App`
 throughout; with any other name, read yours wherever it says `App`.
 
 Create a directory and a `Package.swift`:
@@ -152,7 +153,7 @@ into an immutable `Configuration` at bootstrap. **Nothing re-reads this file
 at runtime** — a configuration value cannot change under a running request,
 which is why `Configuration` is safe to hold anywhere.
 
-`ALULA_SERVER_PORT=9090 swift run App` overrides the port without editing
+`ALULA_SERVER_PORT=9090 ALULA_ENV=dev swift run App` overrides the port without editing
 the file. The mapping is mechanical: `ALULA_`, then the key uppercased with
 dots and dashes as underscores — `datasource.primary.pool-size` is
 `ALULA_DATASOURCE_PRIMARY_POOL_SIZE`.
@@ -944,6 +945,11 @@ struct UserService {
 
 Validation, a transaction spanning two writes, and a rule about what signing
 up *means* — none of that is HTTP and none of it is SQL. That is a service.
+
+`@Service` only puts a type in the graph; it is the general annotation for
+anything that is neither a controller nor a repository. It is unrelated to
+the *lifecycle* services a module runs in the background: types with a
+`run()` that start and drain with the app, such as Part 3's queue workers.
 
 The empty directory is a signal, not an oversight: it is where behaviour goes
 when you have some.
