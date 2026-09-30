@@ -7,14 +7,21 @@ struct Explain: ParsableCommand {
         commandName: "explain",
         abstract: "Explain an Alula diagnostic code.",
         discussion: """
-            Every error and warning Alula reports at build time carries a code, \
-            such as [ALU-DI-1001]. This prints that code's page — what it means, \
-            why Alula rejects it, and how to fix it — the same text as the \
-            page the diagnostic links to, available offline.
+            Every error and warning Alula reports at build time, and every \
+            startup failure, carries a code such as [ALU-DI-1001]. This prints \
+            that code's page — what it means, why Alula rejects it, and how to \
+            fix it — the same text as the page the diagnostic links to, \
+            available offline.
 
               alula explain ALU-DI-1001    one code's page
-              alula explain 1001           the number alone is enough
+              alula explain 1001           the number alone, for an ALU code
               alula explain                every code, by family
+
+            Hangar (HGR-QUERY-…) and alula-data (ALD-…) codes are published \
+            by those packages; give the full code and this prints the link \
+            to its page. Their numbers are not unique on their own \
+            (ALD-CACHE-1001 and ALD-DATA-1001 both exist), so a bare number \
+            only ever looks up an ALU code.
             """
     )
 

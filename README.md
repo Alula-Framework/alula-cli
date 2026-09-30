@@ -59,10 +59,14 @@ alula routes --json
 alula generate controller Orders  # Sources/MyService/Controllers/OrdersController.swift + a test
 alula generate auth               # accounts: registration, email verification, password reset
 alula run commands                # list the app's own commands (declared by modules)
-alula run users                   # run one (the demo's): the app composed, no HTTP server
+ALULA_ENV=dev alula run users     # run one (the demo's): the app composed, no HTTP server
 alula explain ALU-DI-1001         # what a diagnostic's code means, and how to fix it
 alula explain                     # every code, by family
 ```
+
+`alula dev` sets `ALULA_ENV=dev` when it is unset; `alula run` passes
+`ALULA_ENV` through unchanged, since a command may be meant for a deployed
+environment, so the demo's commands need it stated.
 
 `generate` writes into the project's one application target; name it with
 `--target` when `Sources/` holds more than one. `generate auth` needs the
@@ -71,9 +75,11 @@ manifest is missing when it cannot find them.
 
 Alula's build errors and warnings carry a code such as `[ALU-DI-1001]`, and
 so do the failures it reports when an app will not start. `alula explain`
-prints that code's page offline; the number alone
-(`alula explain 1001`) is enough. Hangar (`HGR-…`) and alula-data (`ALD-…`)
-codes point at those packages' pages.
+prints that code's page offline; for an Alula code the number alone
+(`alula explain 1001`) is enough. Hangar (`HGR-QUERY-…`) and alula-data
+(`ALD-…`) codes need the full code, and print a link to that package's page:
+their numbers repeat across families (`ALD-CACHE-1001`, `ALD-DATA-1001`), so
+a bare number only looks up Alula's.
 
 `alula dev` restarts the app with SIGTERM, as an orchestrator would, so it
 drains and shuts down in order. A failed build leaves the previous one
@@ -108,7 +114,7 @@ alula migrate --help             # the full option list
 ```
 
 The connection URL comes from `--database-url`, then `$ALULA_DATABASE_URL`,
-then `$DATABASE_URL`.
+then `$DATABASE_URL`, then `datasource.primary.url` in `alula.yaml`.
 
 Every argument is passed through to the project's migrate executable, so the
 whole command set is available and stays available — a flag added there works

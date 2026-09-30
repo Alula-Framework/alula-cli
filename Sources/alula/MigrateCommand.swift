@@ -26,7 +26,8 @@ struct Migrate: AsyncParsableCommand {
             command builds and runs `migrate` for you.
 
             The connection URL comes from --database-url, then \
-            $ALULA_DATABASE_URL, then $DATABASE_URL.
+            $ALULA_DATABASE_URL, then $DATABASE_URL, then the datasource's \
+            url in alula.yaml.
 
             `alula migrate init` is handled here rather than passed through: \
             it adds the migration targets to a project that has none.

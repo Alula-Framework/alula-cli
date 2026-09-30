@@ -12,6 +12,11 @@ struct Dev: AsyncParsableCommand {
             order, and the new build starts. When the build fails, the old \
             app keeps running and the errors are shown.
 
+            The app runs with ALULA_ENV=dev unless ALULA_ENV is already set: \
+            Alula serves its development-only surfaces (logged mail, the \
+            OpenAPI document, the actuator dashboard) only when the \
+            environment is declared.
+
               alula dev                   the package's executable (not `migrate`)
               alula dev --product Worker  a specific one
               alula dev -- --flag         arguments for the app

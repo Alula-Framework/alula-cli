@@ -16,6 +16,11 @@ struct Run: ParsableCommand {
               alula run import-users users.csv   with arguments
 
             Commands are declared by modules: `commands: [CommandRegistration]`.
+
+            Unlike `alula dev`, this passes ALULA_ENV through unchanged, since \
+            a command may be meant for a deployed environment. Locally, an app \
+            that needs a declared environment (the demo tier, for its mail) \
+            wants `ALULA_ENV=dev alula run ...`.
             """
     )
 
