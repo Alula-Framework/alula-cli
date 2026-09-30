@@ -10,8 +10,9 @@ import AlulaWeb
 /// scans — is wired by the generated composition root, so adding a
 /// controller does not mean editing this file.
 struct AppModule: AlulaModule {
-    /// Modules that must be built before this one. The list is a DAG resolved
-    /// once at bootstrap, so ordering is checked rather than hoped for.
+    /// Modules to include whenever this one is, so naming `AppModule` names
+    /// its whole stack. Construction order comes from which module takes
+    /// another's values, resolved at build time; this list only breaks ties.
     static var dependencies: [any AlulaModule.Type] { [] }
 }
 
